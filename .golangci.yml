@@ -1,0 +1,17 @@
+version: "2"
+
+linters:
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: exported
+  exclusions:
+    rules:
+      - path: \.gen\.go$
+        linters:
+          - revive
+      - path: \.pb\.go$
+        linters:
+          - revive
