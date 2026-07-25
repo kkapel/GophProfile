@@ -13,25 +13,27 @@ import (
 
 const createAvatar = `-- name: CreateAvatar :one
 INSERT INTO avatars (
-    user_id, file_name, mime_type, size_bytes, s3_key, upload_status, processing_status
+    id, user_id, file_name, mime_type, size_bytes, s3_key, upload_status, processing_status
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
 RETURNING id, user_id, file_name, mime_type, size_bytes, width, height, s3_key, thumbnail_s3_keys, upload_status, processing_status, created_at, updated_at, deleted_at
 `
 
 type CreateAvatarParams struct {
-	UserID           string `json:"user_id"`
-	FileName         string `json:"file_name"`
-	MimeType         string `json:"mime_type"`
-	SizeBytes        int64  `json:"size_bytes"`
-	S3Key            string `json:"s3_key"`
-	UploadStatus     string `json:"upload_status"`
-	ProcessingStatus string `json:"processing_status"`
+	ID               uuid.UUID `json:"id"`
+	UserID           string    `json:"user_id"`
+	FileName         string    `json:"file_name"`
+	MimeType         string    `json:"mime_type"`
+	SizeBytes        int64     `json:"size_bytes"`
+	S3Key            string    `json:"s3_key"`
+	UploadStatus     string    `json:"upload_status"`
+	ProcessingStatus string    `json:"processing_status"`
 }
 
 func (q *Queries) CreateAvatar(ctx context.Context, arg CreateAvatarParams) (Avatar, error) {
 	row := q.db.QueryRow(ctx, createAvatar,
+		arg.ID,
 		arg.UserID,
 		arg.FileName,
 		arg.MimeType,

@@ -65,6 +65,7 @@ func NewAvatarRepository(pool *pgxpool.Pool) AvatarRepository {
 // Create сохраняет метаданные новой аватарки и возвращает созданную запись.
 func (r *avatarRepository) Create(ctx context.Context, avatar domain.Avatar) (domain.Avatar, error) {
 	row, err := r.queries.CreateAvatar(ctx, db.CreateAvatarParams{
+		ID:               avatar.ID,
 		UserID:           avatar.UserID,
 		FileName:         avatar.FileName,
 		MimeType:         avatar.MimeType,
