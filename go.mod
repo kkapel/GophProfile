@@ -10,6 +10,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/minio/minio-go/v7 v7.2.1
 	github.com/oapi-codegen/runtime v1.6.0
+	github.com/rabbitmq/amqp091-go v1.13.0
 	github.com/spf13/viper v1.21.0
 )
 
