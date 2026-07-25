@@ -10,8 +10,9 @@ import (
 
 // Config содержит параметры запуска сервиса GophProfile.
 type Config struct {
-	HTTPAddress string
-	LoggerLevel string
+	HTTPAddress    string
+	LoggerLevel    string
+	MigrationsPath string
 
 	DatabaseURL string
 
@@ -35,6 +36,7 @@ func LoadConfig() (*Config, error) {
 	v.SetDefault("minio_endpoint", "localhost:9000")
 	v.SetDefault("minio_bucket", "avatars")
 	v.SetDefault("minio_use_ssl", false)
+	v.SetDefault("migrations_path", "migrations")
 
 	// Переменные окружения: GOPHPROFILE_DATABASE_URL и т.д.
 	v.AllowEmptyEnv(true)
@@ -43,8 +45,9 @@ func LoadConfig() (*Config, error) {
 	v.AutomaticEnv()
 
 	config := &Config{
-		HTTPAddress: v.GetString("http_address"),
-		LoggerLevel: v.GetString("logger_level"),
+		HTTPAddress:    v.GetString("http_address"),
+		LoggerLevel:    v.GetString("logger_level"),
+		MigrationsPath: v.GetString("migrations_path"),
 
 		DatabaseURL: v.GetString("database_url"),
 
