@@ -26,6 +26,8 @@ func (h *AvatarHandler) UploadAvatar(w http.ResponseWriter, r *http.Request, par
 	// поэтому огромный файл не окажется целиком в памяти.
 	r.Body = http.MaxBytesReader(w, r.Body, services.MaxFileSize)
 
+	// Размер тела уже ограничен MaxBytesReader выше, в памяти держим не более 1 MB.
+	//nolint:gosec // G120: parsing is bounded by MaxBytesReader
 	if err := r.ParseMultipartForm(services.MaxFileSize); err != nil {
 		maxSize := services.MaxFileSize
 		writeJSON(w, http.StatusRequestEntityTooLarge, api.Error{
