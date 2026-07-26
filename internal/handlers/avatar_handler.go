@@ -10,6 +10,10 @@ import (
 	"github.com/kkapel/GophProfile/internal/services"
 )
 
+// maxMultipartMemory — сколько данных формы держать в памяти,
+// остальное Go выгружает во временные файлы на диске.
+const maxMultipartMemory = 1 << 20 // 1 MB
+
 // AvatarHandler реализует api.ServerInterface — REST API сервиса аватарок.
 type AvatarHandler struct {
 	service services.AvatarService
@@ -28,7 +32,7 @@ func (h *AvatarHandler) UploadAvatar(w http.ResponseWriter, r *http.Request, par
 
 	// Размер тела уже ограничен MaxBytesReader выше, в памяти держим не более 1 MB.
 	//nolint:gosec // G120: parsing is bounded by MaxBytesReader
-	if err := r.ParseMultipartForm(services.MaxFileSize); err != nil {
+	if err := r.ParseMultipartForm(maxMultipartMemory); err != nil {
 		maxSize := services.MaxFileSize
 		writeJSON(w, http.StatusRequestEntityTooLarge, api.Error{
 			Error:   "File too large",

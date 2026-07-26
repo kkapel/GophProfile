@@ -68,21 +68,44 @@ func run() error {
 	}
 	logger.Log.Info("storage connected", "bucket", cfg.MinioBucket)
 
+	// Подключение к брокеру сообщений
+	rabbit, err := broker.NewRabbitMQ(cfg.RabbitMQURL)
+	if err != nil {
+		return fmt.Errorf("init broker: %w", err)
+	}
+	defer func() {
+		_ = rabbit.Close()
+	}()
+	logger.Log.Info("broker connected")
+
 	// Сборка слоёв приложения
-	publisher := broker.NewStubPublisher()
 	avatarRepo := repository.NewAvatarRepository(db.Pool)
-	avatarService := services.NewAvatarService(avatarRepo, store, publisher)
+	avatarService := services.NewAvatarService(avatarRepo, store, rabbit)
 	avatarHandler := handlers.NewAvatarHandler(avatarService)
+
+	webHandler, err := handlers.NewWebHandler(avatarService)
+	if err != nil {
+		return fmt.Errorf("init web handler: %w", err)
+	}
 
 	healthHandler := handlers.NewHealthHandler(map[string]handlers.Pinger{
 		"database": db,
 		"storage":  store,
+		"broker":   rabbit,
 	})
 
 	r := chi.NewRouter()
 	// Добавить хэндлеры
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
+
+	// Веб-интерфейс
+	r.Get("/web/upload", webHandler.UploadPage)
+	r.Post("/web/upload", webHandler.Upload)
+	r.Get("/web/gallery/{user_id}", webHandler.GalleryPage)
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/web/upload", http.StatusFound)
+	})
 
 	// Делаем пинг для дб и объектного хранилища
 	r.Method(http.MethodGet, "/health", healthHandler)
@@ -93,8 +116,8 @@ func run() error {
 	srv := &http.Server{
 		Addr:         cfg.HTTPAddress,
 		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
 	}
 
 	// Запуск в отдельной горутине, чтобы не блокировать ожидание сигнала.
@@ -108,13 +131,13 @@ func run() error {
 	}()
 
 	// Ожидаем SIGINT/SIGTERM.
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	select {
 	case err := <-srvErr:
 		return fmt.Errorf("listen and serve: %w", err)
-	case <-ctx.Done():
+	case <-signalCtx.Done():
 	}
 
 	logger.Log.Info("shutting down")
