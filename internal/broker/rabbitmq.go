@@ -16,9 +16,9 @@ const (
 	// ExchangeName — точка обмена, куда публикуются все события аватарок.
 	ExchangeName = "avatars.exchange"
 	// QueueProcess — очередь задач на обработку изображений.
-	QueueProcess = "avatars.process"
+	QueueProcess = "queue.avatars.process"
 	// QueueDelete — очередь задач на удаление файлов.
-	QueueDelete = "avatars.delete"
+	QueueDelete = "queue.avatars.delete"
 )
 
 // RabbitMQ — подключение к брокеру сообщений.

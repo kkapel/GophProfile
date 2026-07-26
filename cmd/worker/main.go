@@ -4,13 +4,19 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/kkapel/GophProfile/internal/broker"
 	"github.com/kkapel/GophProfile/internal/config"
+	"github.com/kkapel/GophProfile/internal/database"
 	"github.com/kkapel/GophProfile/internal/logger"
+	"github.com/kkapel/GophProfile/internal/repository"
+	"github.com/kkapel/GophProfile/internal/storage"
+	"github.com/kkapel/GophProfile/internal/worker"
 )
 
 func main() {
@@ -21,25 +27,53 @@ func main() {
 }
 
 func run() error {
-	// Инициализация конфигурации
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return err
 	}
 
-	// Логгер
 	if err := logger.Initialize(cfg.LoggerLevel); err != nil {
 		return err
 	}
-	logger.Log.Info("worker started")
+	logger.Log.Info("Logger initialized")
 
-	// TODO(этап 6): подключение к RabbitMQ, PostgreSQL и MinIO,
-	// подписка на очереди и обработка событий.
-
-	// Ожидаем SIGINT/SIGTERM.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	<-ctx.Done()
+
+	// Миграции накатывает сервер, worker только подключается.
+	db, err := database.New(ctx, cfg.DatabaseURL, cfg.MigrationsPath)
+	if err != nil {
+		return fmt.Errorf("init database: %w", err)
+	}
+	defer db.Close()
+
+	store, err := storage.New(ctx, storage.Config{
+		Endpoint:  cfg.MinioEndpoint,
+		AccessKey: cfg.MinioAccessKey,
+		SecretKey: cfg.MinioSecretKey,
+		Bucket:    cfg.MinioBucket,
+		UseSSL:    cfg.MinioUseSSL,
+	})
+	if err != nil {
+		return fmt.Errorf("init storage: %w", err)
+	}
+
+	rabbit, err := broker.NewRabbitMQ(cfg.RabbitMQURL)
+	if err != nil {
+		return fmt.Errorf("init broker: %w", err)
+	}
+	defer func() {
+		_ = rabbit.Close()
+	}()
+
+	avatarRepo := repository.NewAvatarRepository(db.Pool)
+	w := worker.New(avatarRepo, store, rabbit)
+
+	logger.Log.Info("worker started")
+
+	if err := w.Run(ctx); err != nil {
+		return fmt.Errorf("worker run: %w", err)
+	}
 
 	logger.Log.Info("worker stopped")
 
