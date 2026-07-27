@@ -15,7 +15,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-
+      start_period: 10s
   minio:
     image: minio/minio:latest
     container_name: gophprofile-minio
@@ -50,6 +50,51 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+  server:
+    build: .
+    container_name: gophprofile-server
+    command: ["./server"]
+    environment:
+      GOPHPROFILE_HTTP_ADDRESS: ":8080"
+      GOPHPROFILE_LOGGER_LEVEL: "INFO"
+      GOPHPROFILE_DATABASE_URL: "postgres://gophprofile:gophprofile@postgres:5432/gophprofile?sslmode=disable"
+      GOPHPROFILE_MIGRATIONS_PATH: "migrations"
+      GOPHPROFILE_MINIO_ENDPOINT: "minio:9000"
+      GOPHPROFILE_MINIO_ACCESS_KEY: "minioadmin"
+      GOPHPROFILE_MINIO_SECRET_KEY: "minioadmin"
+      GOPHPROFILE_MINIO_BUCKET: "avatars"
+      GOPHPROFILE_RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+  worker:
+    build: .
+    container_name: gophprofile-worker
+    command: ["./worker"]
+    environment:
+      GOPHPROFILE_LOGGER_LEVEL: "INFO"
+      GOPHPROFILE_DATABASE_URL: "postgres://gophprofile:gophprofile@postgres:5432/gophprofile?sslmode=disable"
+      GOPHPROFILE_MIGRATIONS_PATH: "migrations"
+      GOPHPROFILE_MINIO_ENDPOINT: "minio:9000"
+      GOPHPROFILE_MINIO_ACCESS_KEY: "minioadmin"
+      GOPHPROFILE_MINIO_SECRET_KEY: "minioadmin"
+      GOPHPROFILE_MINIO_BUCKET: "avatars"
+      GOPHPROFILE_RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+    depends_on:
+      server:
+        condition: service_healthy    
 
 volumes:
   pgdata:
