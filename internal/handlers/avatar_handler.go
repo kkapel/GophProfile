@@ -33,11 +33,16 @@ func (h *AvatarHandler) UploadAvatar(w http.ResponseWriter, r *http.Request, par
 	// Размер тела уже ограничен MaxBytesReader выше, в памяти держим не более 1 MB.
 	//nolint:gosec // G120: parsing is bounded by MaxBytesReader
 	if err := r.ParseMultipartForm(maxMultipartMemory); err != nil {
-		maxSize := services.MaxFileSize
-		writeJSON(w, http.StatusRequestEntityTooLarge, api.Error{
-			Error:   "File too large",
-			MaxSize: &maxSize,
-		})
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			maxSize := services.MaxFileSize
+			writeJSON(w, http.StatusRequestEntityTooLarge, api.Error{
+				Error:   "File too large",
+				MaxSize: &maxSize,
+			})
+			return
+		}
+		writeError(w, http.StatusBadRequest, "Invalid request", "malformed multipart form")
 		return
 	}
 	defer func() {

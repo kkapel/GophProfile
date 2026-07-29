@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -54,11 +55,17 @@ func (h *WebHandler) Upload(w http.ResponseWriter, r *http.Request) {
 
 	//nolint:gosec // G120: parsing is bounded by MaxBytesReader
 	if err := r.ParseMultipartForm(maxMultipartMemory); err != nil {
-		maxSize := services.MaxFileSize
-		writeJSON(w, http.StatusRequestEntityTooLarge, api.Error{
-			Error:   "File too large",
-			MaxSize: &maxSize,
-		})
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			maxSize := services.MaxFileSize
+			writeJSON(w, http.StatusRequestEntityTooLarge, api.Error{
+				Error:   "File too large",
+				MaxSize: &maxSize,
+			})
+			return
+		}
+
+		writeError(w, http.StatusBadRequest, "Invalid request", "malformed multipart form")
 		return
 	}
 	defer func() {
