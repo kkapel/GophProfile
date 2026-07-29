@@ -29,6 +29,15 @@ func New(ctx context.Context, dsn, migrationsPath string) (*DB, error) {
 		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 
+	return Connect(ctx, dsn)
+}
+
+// Connect открывает пул подключений без применения миграций.
+func Connect(ctx context.Context, dsn string) (*DB, error) {
+	if dsn == "" {
+		return nil, errors.New("database DSN is empty")
+	}
+
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("parse dsn: %w", err)

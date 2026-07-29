@@ -42,7 +42,7 @@ func run() error {
 	defer stop()
 
 	// Миграции накатывает сервер, worker только подключается.
-	db, err := database.New(ctx, cfg.DatabaseURL, cfg.MigrationsPath)
+	db, err := database.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return fmt.Errorf("init database: %w", err)
 	}

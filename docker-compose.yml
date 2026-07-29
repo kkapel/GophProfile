@@ -86,7 +86,6 @@ services:
     environment:
       GOPHPROFILE_LOGGER_LEVEL: "INFO"
       GOPHPROFILE_DATABASE_URL: "postgres://gophprofile:gophprofile@postgres:5432/gophprofile?sslmode=disable"
-      GOPHPROFILE_MIGRATIONS_PATH: "migrations"
       GOPHPROFILE_MINIO_ENDPOINT: "minio:9000"
       GOPHPROFILE_MINIO_ACCESS_KEY: "minioadmin"
       GOPHPROFILE_MINIO_SECRET_KEY: "minioadmin"
