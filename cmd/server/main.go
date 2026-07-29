@@ -40,10 +40,12 @@ func run() error {
 	}
 
 	// Логгер
-	if err := logger.Initialize(cfg.LoggerLevel); err != nil {
+	log, err := logger.New(cfg.LoggerLevel)
+	if err != nil {
 		return err
 	}
-	logger.Log.Info("Logger initialized")
+	log = log.With("component", "server")
+	log.Info("logger initialized")
 
 	ctx := context.Background()
 
@@ -53,7 +55,7 @@ func run() error {
 		return fmt.Errorf("init database: %w", err)
 	}
 	defer db.Close()
-	logger.Log.Info("database connected, migrations applied")
+	log.Info("database connected, migrations applied")
 
 	// Подключение к объектному хранилищу
 	store, err := storage.New(ctx, storage.Config{
@@ -66,7 +68,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("init storage: %w", err)
 	}
-	logger.Log.Info("storage connected", "bucket", cfg.MinioBucket)
+	log.Info("storage connected", "bucket", cfg.MinioBucket)
 
 	// Подключение к брокеру сообщений
 	rabbit, err := broker.NewRabbitMQ(cfg.RabbitMQURL)
@@ -76,7 +78,7 @@ func run() error {
 	defer func() {
 		_ = rabbit.Close()
 	}()
-	logger.Log.Info("broker connected")
+	log.Info("broker connected")
 
 	// Сборка слоёв приложения
 	avatarRepo := repository.NewAvatarRepository(db.Pool)
@@ -123,9 +125,9 @@ func run() error {
 	// Запуск в отдельной горутине, чтобы не блокировать ожидание сигнала.
 	srvErr := make(chan error, 1)
 	go func() {
-		logger.Log.Info("server started", "addr", cfg.HTTPAddress)
+		log.Info("server started", "addr", cfg.HTTPAddress)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Log.Error("server error", "err", err)
+			log.Error("server error", "err", err)
 			srvErr <- err
 		}
 	}()
@@ -140,14 +142,14 @@ func run() error {
 	case <-signalCtx.Done():
 	}
 
-	logger.Log.Info("shutting down")
+	log.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
-	logger.Log.Info("stopped")
+	log.Info("stopped")
 
 	return nil
 }

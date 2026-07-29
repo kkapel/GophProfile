@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,7 +16,6 @@ import (
 	"github.com/kkapel/GophProfile/internal/broker"
 	"github.com/kkapel/GophProfile/internal/domain"
 	"github.com/kkapel/GophProfile/internal/imageutil"
-	"github.com/kkapel/GophProfile/internal/logger"
 	"github.com/kkapel/GophProfile/internal/repository"
 	"github.com/kkapel/GophProfile/internal/storage"
 )
@@ -38,11 +38,12 @@ type Worker struct {
 	repo    repository.AvatarRepository
 	storage storage.FileStorage
 	broker  *broker.RabbitMQ
+	log     *slog.Logger
 }
 
 // New создаёт worker.
-func New(repo repository.AvatarRepository, store storage.FileStorage, b *broker.RabbitMQ) *Worker {
-	return &Worker{repo: repo, storage: store, broker: b}
+func New(repo repository.AvatarRepository, store storage.FileStorage, b *broker.RabbitMQ, log *slog.Logger) *Worker {
+	return &Worker{repo: repo, storage: store, broker: b, log: log}
 }
 
 // Run подписывается на очереди и обрабатывает сообщения
@@ -58,7 +59,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		return err
 	}
 
-	logger.Log.Info("worker consuming", "queues", []string{broker.QueueProcess, broker.QueueDelete})
+	w.log.Info("worker consuming", "queues", []string{broker.QueueProcess, broker.QueueDelete})
 
 	for {
 		select {
@@ -89,12 +90,12 @@ func (w *Worker) process(ctx context.Context, delivery amqp.Delivery, handler fu
 		if err = handler(ctx, delivery.Body); err == nil {
 			// Подтверждаем обработку: сообщение удаляется из очереди.
 			if ackErr := delivery.Ack(false); ackErr != nil {
-				logger.Log.Error("ack message", "err", ackErr)
+				w.log.Error("ack message", "err", ackErr)
 			}
 			return
 		}
 
-		logger.Log.Warn("handle message failed", "attempt", attempt, "err", err)
+		w.log.Warn("handle message failed", "attempt", attempt, "err", err)
 
 		if attempt < maxAttempts {
 			// Экспоненциальная задержка: 1с, 2с, 4с...
@@ -107,12 +108,12 @@ func (w *Worker) process(ctx context.Context, delivery amqp.Delivery, handler fu
 		}
 	}
 
-	logger.Log.Error("message dropped after retries", "err", err)
+	w.log.Error("message dropped after retries", "err", err)
 
 	// requeue=false: сообщение не возвращается в очередь, иначе
 	// оно будет обрабатываться бесконечно.
 	if nackErr := delivery.Nack(false, false); nackErr != nil {
-		logger.Log.Error("nack message", "err", nackErr)
+		w.log.Error("nack message", "err", nackErr)
 	}
 }
 
@@ -133,7 +134,7 @@ func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			// Аватарку уже удалили — обрабатывать нечего.
-			logger.Log.Info("avatar not found, skipping", "avatar_id", event.AvatarID)
+			w.log.Info("avatar not found, skipping", "avatar_id", event.AvatarID)
 			return nil
 		}
 		return err
@@ -142,7 +143,7 @@ func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 	// Идемпотентность: повторная доставка того же события
 	// не должна выполнять работу заново.
 	if avatar.ProcessingStatus == domain.ProcessingStatusCompleted {
-		logger.Log.Info("avatar already processed, skipping", "avatar_id", event.AvatarID)
+		w.log.Info("avatar already processed, skipping", "avatar_id", event.AvatarID)
 		return nil
 	}
 
@@ -163,7 +164,7 @@ func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 		return err
 	}
 
-	logger.Log.Info("avatar processed", "avatar_id", event.AvatarID, "thumbnails", len(thumbnails))
+	w.log.Info("avatar processed", "avatar_id", event.AvatarID, "thumbnails", len(thumbnails))
 
 	return nil
 }
@@ -218,7 +219,7 @@ func (w *Worker) handleDelete(ctx context.Context, body []byte) error {
 		return err
 	}
 
-	logger.Log.Info("avatar files deleted", "avatar_id", event.AvatarID, "keys", len(event.S3Keys))
+	w.log.Info("avatar files deleted", "avatar_id", event.AvatarID, "keys", len(event.S3Keys))
 
 	return nil
 }

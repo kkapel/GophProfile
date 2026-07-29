@@ -32,10 +32,11 @@ func run() error {
 		return err
 	}
 
-	if err := logger.Initialize(cfg.LoggerLevel); err != nil {
+	log, err := logger.New(cfg.LoggerLevel)
+	if err != nil {
 		return err
 	}
-	logger.Log.Info("Logger initialized")
+	log = log.With("component", "worker")
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -67,15 +68,15 @@ func run() error {
 	}()
 
 	avatarRepo := repository.NewAvatarRepository(db.Pool)
-	w := worker.New(avatarRepo, store, rabbit)
+	w := worker.New(avatarRepo, store, rabbit, log)
 
-	logger.Log.Info("worker started")
+	log.Info("worker started")
 
 	if err := w.Run(ctx); err != nil {
 		return fmt.Errorf("worker run: %w", err)
 	}
 
-	logger.Log.Info("worker stopped")
+	log.Info("worker stopped")
 
 	return nil
 }

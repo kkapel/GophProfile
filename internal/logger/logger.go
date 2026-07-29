@@ -1,21 +1,36 @@
-// Package logger инициализирует и предоставляет структурированный логгер приложения.
+// Package logger создаёт логгеры приложения.
 package logger
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 )
 
-// Log — глобальный логгер приложения. По умолчанию пишет JSON уровня Info в stdout.
-var Log *slog.Logger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-
-// Initialize настраивает глобальный логгер на заданный уровень (например, "info", "debug", "error").
-func Initialize(level string) error {
-	var l slog.Level
-	if err := l.UnmarshalText([]byte(level)); err != nil {
-		return err
+// New создаёт JSON-логгер, пишущий в stdout с указанным уровнем.
+// Допустимые уровни: DEBUG, INFO, WARN, ERROR.
+func New(level string) (*slog.Logger, error) {
+	parsed, err := parseLevel(level)
+	if err != nil {
+		return nil, err
 	}
-	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: l})
-	Log = slog.New(handler)
-	return nil
+
+	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: parsed})), nil
+}
+
+// parseLevel переводит строковый уровень логирования в slog.Level.
+func parseLevel(level string) (slog.Level, error) {
+	switch strings.ToUpper(strings.TrimSpace(level)) {
+	case "DEBUG":
+		return slog.LevelDebug, nil
+	case "INFO":
+		return slog.LevelInfo, nil
+	case "WARN":
+		return slog.LevelWarn, nil
+	case "ERROR":
+		return slog.LevelError, nil
+	default:
+		return 0, fmt.Errorf("unknown logger level %q", level)
+	}
 }

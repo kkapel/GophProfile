@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/jpeg"
 	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/google/uuid"
@@ -95,7 +96,7 @@ func TestHandleUpload_CreatesThumbnails(t *testing.T) {
 			return domain.Avatar{}, nil
 		})
 
-	w := New(repo, store, nil)
+	w := New(repo, store, nil, slog.New(slog.DiscardHandler))
 
 	require.NoError(t, w.handleUpload(context.Background(), uploadEventBody(t, id, key)))
 	assert.Len(t, uploaded, 2)
@@ -114,7 +115,7 @@ func TestHandleUpload_IdempotentWhenCompleted(t *testing.T) {
 		ProcessingStatus: domain.ProcessingStatusCompleted,
 	}, nil)
 
-	w := New(repo, store, nil)
+	w := New(repo, store, nil, slog.New(slog.DiscardHandler))
 
 	assert.NoError(t, w.handleUpload(context.Background(), uploadEventBody(t, id, "key")))
 }
@@ -126,7 +127,7 @@ func TestHandleUpload_AvatarAlreadyDeleted(t *testing.T) {
 	id := uuid.New()
 	repo.EXPECT().GetByID(gomock.Any(), id).Return(domain.Avatar{}, repository.ErrNotFound)
 
-	w := New(repo, mocks.NewMockFileStorage(ctrl), nil)
+	w := New(repo, mocks.NewMockFileStorage(ctrl), nil, slog.New(slog.DiscardHandler))
 
 	// Удалённая аватарка — не ошибка, сообщение подтверждается.
 	assert.NoError(t, w.handleUpload(context.Background(), uploadEventBody(t, id, "key")))
@@ -154,7 +155,7 @@ func TestHandleUpload_MarksFailedOnBrokenImage(t *testing.T) {
 
 	repo.EXPECT().UpdateProcessingStatus(gomock.Any(), id, domain.ProcessingStatusFailed).Return(nil)
 
-	w := New(repo, store, nil)
+	w := New(repo, store, nil, slog.New(slog.DiscardHandler))
 
 	assert.Error(t, w.handleUpload(context.Background(), uploadEventBody(t, id, key)))
 }
@@ -162,7 +163,7 @@ func TestHandleUpload_MarksFailedOnBrokenImage(t *testing.T) {
 func TestHandleUpload_InvalidJSON(t *testing.T) {
 	ctrl := gomock.NewController(t)
 
-	w := New(mocks.NewMockAvatarRepository(ctrl), mocks.NewMockFileStorage(ctrl), nil)
+	w := New(mocks.NewMockAvatarRepository(ctrl), mocks.NewMockFileStorage(ctrl), nil, slog.New(slog.DiscardHandler))
 
 	assert.Error(t, w.handleUpload(context.Background(), []byte("{не json")))
 }
@@ -186,7 +187,7 @@ func TestHandleDelete_RemovesFiles(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	w := New(mocks.NewMockAvatarRepository(ctrl), store, nil)
+	w := New(mocks.NewMockAvatarRepository(ctrl), store, nil, slog.New(slog.DiscardHandler))
 
 	assert.NoError(t, w.handleDelete(context.Background(), body))
 }
