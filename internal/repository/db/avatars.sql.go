@@ -17,7 +17,9 @@ INSERT INTO avatars (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8
 )
-RETURNING id, user_id, file_name, mime_type, size_bytes, width, height, s3_key, thumbnail_s3_keys, upload_status, processing_status, created_at, updated_at, deleted_at
+RETURNING id, user_id, file_name, mime_type, size_bytes, width, height,
+          s3_key, thumbnail_s3_keys, upload_status, processing_status,
+          created_at, updated_at, deleted_at
 `
 
 type CreateAvatarParams struct {
@@ -63,7 +65,10 @@ func (q *Queries) CreateAvatar(ctx context.Context, arg CreateAvatarParams) (Ava
 }
 
 const getAvatarByID = `-- name: GetAvatarByID :one
-SELECT id, user_id, file_name, mime_type, size_bytes, width, height, s3_key, thumbnail_s3_keys, upload_status, processing_status, created_at, updated_at, deleted_at FROM avatars
+SELECT id, user_id, file_name, mime_type, size_bytes, width, height,
+       s3_key, thumbnail_s3_keys, upload_status, processing_status,
+       created_at, updated_at, deleted_at
+FROM avatars
 WHERE id = $1 AND deleted_at IS NULL
 `
 
@@ -90,7 +95,10 @@ func (q *Queries) GetAvatarByID(ctx context.Context, id uuid.UUID) (Avatar, erro
 }
 
 const getLatestAvatarByUserID = `-- name: GetLatestAvatarByUserID :one
-SELECT id, user_id, file_name, mime_type, size_bytes, width, height, s3_key, thumbnail_s3_keys, upload_status, processing_status, created_at, updated_at, deleted_at FROM avatars
+SELECT id, user_id, file_name, mime_type, size_bytes, width, height,
+       s3_key, thumbnail_s3_keys, upload_status, processing_status,
+       created_at, updated_at, deleted_at
+FROM avatars
 WHERE user_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC
 LIMIT 1
@@ -119,7 +127,10 @@ func (q *Queries) GetLatestAvatarByUserID(ctx context.Context, userID string) (A
 }
 
 const listAvatarsByUserID = `-- name: ListAvatarsByUserID :many
-SELECT id, user_id, file_name, mime_type, size_bytes, width, height, s3_key, thumbnail_s3_keys, upload_status, processing_status, created_at, updated_at, deleted_at FROM avatars
+SELECT id, user_id, file_name, mime_type, size_bytes, width, height,
+       s3_key, thumbnail_s3_keys, upload_status, processing_status,
+       created_at, updated_at, deleted_at
+FROM avatars
 WHERE user_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC
 `
@@ -163,7 +174,9 @@ const softDeleteAvatar = `-- name: SoftDeleteAvatar :one
 UPDATE avatars
 SET deleted_at = NOW(), updated_at = NOW()
 WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, user_id, file_name, mime_type, size_bytes, width, height, s3_key, thumbnail_s3_keys, upload_status, processing_status, created_at, updated_at, deleted_at
+RETURNING id, user_id, file_name, mime_type, size_bytes, width, height,
+          s3_key, thumbnail_s3_keys, upload_status, processing_status,
+          created_at, updated_at, deleted_at
 `
 
 func (q *Queries) SoftDeleteAvatar(ctx context.Context, id uuid.UUID) (Avatar, error) {
@@ -196,7 +209,9 @@ SET processing_status = $2,
     height = $5,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, user_id, file_name, mime_type, size_bytes, width, height, s3_key, thumbnail_s3_keys, upload_status, processing_status, created_at, updated_at, deleted_at
+RETURNING id, user_id, file_name, mime_type, size_bytes, width, height,
+          s3_key, thumbnail_s3_keys, upload_status, processing_status,
+          created_at, updated_at, deleted_at
 `
 
 type UpdateProcessingResultParams struct {

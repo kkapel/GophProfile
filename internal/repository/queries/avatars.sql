@@ -4,20 +4,31 @@ INSERT INTO avatars (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8
 )
-RETURNING *;
+RETURNING id, user_id, file_name, mime_type, size_bytes, width, height,
+          s3_key, thumbnail_s3_keys, upload_status, processing_status,
+          created_at, updated_at, deleted_at;
 
 -- name: GetAvatarByID :one
-SELECT * FROM avatars
+SELECT id, user_id, file_name, mime_type, size_bytes, width, height,
+       s3_key, thumbnail_s3_keys, upload_status, processing_status,
+       created_at, updated_at, deleted_at
+FROM avatars
 WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: GetLatestAvatarByUserID :one
-SELECT * FROM avatars
+SELECT id, user_id, file_name, mime_type, size_bytes, width, height,
+       s3_key, thumbnail_s3_keys, upload_status, processing_status,
+       created_at, updated_at, deleted_at
+FROM avatars
 WHERE user_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC
 LIMIT 1;
 
 -- name: ListAvatarsByUserID :many
-SELECT * FROM avatars
+SELECT id, user_id, file_name, mime_type, size_bytes, width, height,
+       s3_key, thumbnail_s3_keys, upload_status, processing_status,
+       created_at, updated_at, deleted_at
+FROM avatars
 WHERE user_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC;
 
@@ -25,7 +36,9 @@ ORDER BY created_at DESC;
 UPDATE avatars
 SET deleted_at = NOW(), updated_at = NOW()
 WHERE id = $1 AND deleted_at IS NULL
-RETURNING *;
+RETURNING id, user_id, file_name, mime_type, size_bytes, width, height,
+          s3_key, thumbnail_s3_keys, upload_status, processing_status,
+          created_at, updated_at, deleted_at;
 
 -- name: UpdateProcessingResult :one
 UPDATE avatars
@@ -35,7 +48,9 @@ SET processing_status = $2,
     height = $5,
     updated_at = NOW()
 WHERE id = $1
-RETURNING *;
+RETURNING id, user_id, file_name, mime_type, size_bytes, width, height,
+          s3_key, thumbnail_s3_keys, upload_status, processing_status,
+          created_at, updated_at, deleted_at;
 
 -- name: UpdateProcessingStatus :exec
 UPDATE avatars
