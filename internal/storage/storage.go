@@ -61,7 +61,7 @@ type Config struct {
 }
 
 // New создаёт клиент хранилища и при необходимости создаёт бакет.
-func New(ctx context.Context, cfg Config) (FileStorage, error) {
+func New(ctx context.Context, cfg Config) (*minioStorage, error) {
 	// minio.New только конструирует клиента и валидирует параметры —
 	// сетевого подключения здесь ещё НЕ происходит.
 	client, err := minio.New(cfg.Endpoint, &minio.Options{

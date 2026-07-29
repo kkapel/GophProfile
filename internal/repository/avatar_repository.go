@@ -58,7 +58,7 @@ type avatarRepository struct {
 }
 
 // NewAvatarRepository создаёт репозиторий поверх пула подключений.
-func NewAvatarRepository(pool *pgxpool.Pool) AvatarRepository {
+func NewAvatarRepository(pool *pgxpool.Pool) *avatarRepository {
 	return &avatarRepository{queries: db.New(pool)}
 }
 

@@ -93,7 +93,7 @@ func NewAvatarService(
 	repo repository.AvatarRepository,
 	store storage.FileStorage,
 	publisher EventPublisher,
-) AvatarService {
+) *avatarService {
 	return &avatarService{repo: repo, storage: store, publisher: publisher}
 }
 
