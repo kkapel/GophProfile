@@ -340,4 +340,16 @@ golangci-lint run ./...
 ├── Dockerfile              multi-stage сборка обоих бинарников
 └── docker-compose.yml      приложение и инфраструктура
 ```
-# GophProfile
+
+## Частые проблемы
+
+**RabbitMQ не стартует после смены мажорной версии образа**
+
+Данные в volume несовместимы между ветками 3.x и 4.x. Удалите том
+и позвольте топологии объявиться заново при следующем запуске сервера:
+
+```bash
+docker compose down
+docker volume rm gophprofile_rabbitdata
+docker compose up --build -d
+```
