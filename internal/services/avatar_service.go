@@ -70,7 +70,7 @@ type FileStorage interface {
 	Delete(ctx context.Context, key string) error
 }
 
-// avatarService — реализация AvatarService.
+// AvatarService реализует бизнес-логику работы с аватарками.
 type AvatarService struct {
 	repo      AvatarRepository
 	storage   FileStorage

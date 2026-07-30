@@ -18,8 +18,7 @@ import (
 // ErrNotFound возвращается, когда аватарка не найдена или уже удалена.
 var ErrNotFound = errors.New("avatar not found")
 
-// avatarRepository — реализация AvatarRepository поверх сгенерированных
-// sqlc-запросов и пула подключений pgx.
+// AvatarRepository хранит метаданные аватарок в PostgreSQL.
 type AvatarRepository struct {
 	queries *db.Queries
 }
