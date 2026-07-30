@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"time"
@@ -137,13 +136,14 @@ func (w *Worker) process(ctx context.Context, delivery amqp.Delivery, handler fu
 func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 	var event domain.AvatarUploadEvent
 	if err := json.Unmarshal(body, &event); err != nil {
-		// Битое сообщение повторять бессмысленно.
-		return fmt.Errorf("unmarshal upload event: %w", err)
+		w.log.Error("skip malformed upload event", "err", err)
+		return nil
 	}
 
 	avatarID, err := uuid.Parse(event.AvatarID)
 	if err != nil {
-		return fmt.Errorf("parse avatar id: %w", err)
+		w.log.Error("skip event with invalid avatar id", "avatar_id", event.AvatarID, "err", err)
+		return nil
 	}
 
 	avatar, err := w.repo.GetByID(ctx, avatarID)
@@ -227,7 +227,8 @@ func (w *Worker) makeThumbnails(ctx context.Context, avatarID, s3Key string) (
 func (w *Worker) handleDelete(ctx context.Context, body []byte) error {
 	var event domain.AvatarDeleteEvent
 	if err := json.Unmarshal(body, &event); err != nil {
-		return fmt.Errorf("unmarshal delete event: %w", err)
+		w.log.Error("skip malformed delete event", "err", err)
+		return nil
 	}
 
 	// Удаление в S3 идемпотентно: повторный вызов не вернёт ошибку.

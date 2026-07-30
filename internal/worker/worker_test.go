@@ -165,7 +165,7 @@ func TestHandleUpload_InvalidJSON(t *testing.T) {
 
 	w := New(mocks.NewMockAvatarRepository(ctrl), mocks.NewMockFileStorage(ctrl), nil, slog.New(slog.DiscardHandler))
 
-	assert.Error(t, w.handleUpload(context.Background(), []byte("{не json")))
+	assert.NoError(t, w.handleUpload(context.Background(), []byte("{не json")))
 }
 
 func TestHandleDelete_RemovesFiles(t *testing.T) {
