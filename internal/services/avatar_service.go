@@ -63,33 +63,6 @@ type AvatarRepository interface {
 	SoftDelete(ctx context.Context, id uuid.UUID) (domain.Avatar, error)
 }
 
-// AvatarService описывает операции над аватарками.
-type AvatarService interface {
-	// Upload сохраняет оригинал в хранилище, создаёт запись в БД
-	// и публикует событие на асинхронную обработку.
-	Upload(ctx context.Context, in UploadInput) (domain.Avatar, error)
-
-	// GetFile возвращает файл аватарки нужного размера.
-	// Вызывающий обязан закрыть Object.Body.
-	GetFile(ctx context.Context, id uuid.UUID, size string) (*storage.Object, error)
-
-	// GetUserFile возвращает файл последней аватарки пользователя.
-	GetUserFile(ctx context.Context, userID, size string) (*storage.Object, error)
-
-	// GetMetadata возвращает метаданные аватарки.
-	GetMetadata(ctx context.Context, id uuid.UUID) (domain.Avatar, error)
-
-	// List возвращает все аватарки пользователя.
-	List(ctx context.Context, userID string) ([]domain.Avatar, error)
-
-	// Delete помечает аватарку удалённой и публикует событие
-	// на асинхронное удаление файлов. Удалять может только владелец.
-	Delete(ctx context.Context, id uuid.UUID, requesterID string) error
-
-	// DeleteUserAvatar удаляет последнюю аватарку пользователя.
-	DeleteUserAvatar(ctx context.Context, userID, requesterID string) error
-}
-
 // FileStorage — операции над файлами, необходимые сервису.
 type FileStorage interface {
 	Upload(ctx context.Context, key string, r io.Reader, size int64, contentType string) error
@@ -98,7 +71,7 @@ type FileStorage interface {
 }
 
 // avatarService — реализация AvatarService.
-type avatarService struct {
+type AvatarService struct {
 	repo      AvatarRepository
 	storage   FileStorage
 	publisher EventPublisher
@@ -109,13 +82,13 @@ func NewAvatarService(
 	repo AvatarRepository,
 	store FileStorage,
 	publisher EventPublisher,
-) *avatarService {
-	return &avatarService{repo: repo, storage: store, publisher: publisher}
+) *AvatarService {
+	return &AvatarService{repo: repo, storage: store, publisher: publisher}
 }
 
 // Upload сохраняет оригинал в хранилище, создаёт запись в БД
 // и публикует событие на асинхронную обработку.
-func (s *avatarService) Upload(ctx context.Context, in UploadInput) (domain.Avatar, error) {
+func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (domain.Avatar, error) {
 	if in.Size > MaxFileSize {
 		return domain.Avatar{}, ErrFileTooLarge
 	}
@@ -164,7 +137,7 @@ func (s *avatarService) Upload(ctx context.Context, in UploadInput) (domain.Avat
 }
 
 // GetFile возвращает файл аватарки нужного размера.
-func (s *avatarService) GetFile(ctx context.Context, id uuid.UUID, size string) (*storage.Object, error) {
+func (s *AvatarService) GetFile(ctx context.Context, id uuid.UUID, size string) (*storage.Object, error) {
 	avatar, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, mapRepoError(err)
@@ -174,7 +147,7 @@ func (s *avatarService) GetFile(ctx context.Context, id uuid.UUID, size string) 
 }
 
 // GetUserFile возвращает файл последней аватарки пользователя.
-func (s *avatarService) GetUserFile(ctx context.Context, userID, size string) (*storage.Object, error) {
+func (s *AvatarService) GetUserFile(ctx context.Context, userID, size string) (*storage.Object, error) {
 	avatar, err := s.repo.GetLatestByUserID(ctx, userID)
 	if err != nil {
 		return nil, mapRepoError(err)
@@ -185,7 +158,7 @@ func (s *avatarService) GetUserFile(ctx context.Context, userID, size string) (*
 
 // downloadBySize выбирает нужный ключ (оригинал или миниатюру) и качает файл.
 // Если миниатюра ещё не готова, отдаёт оригинал.
-func (s *avatarService) downloadBySize(ctx context.Context, avatar domain.Avatar, size string) (*storage.Object, error) {
+func (s *AvatarService) downloadBySize(ctx context.Context, avatar domain.Avatar, size string) (*storage.Object, error) {
 	key := avatar.S3Key
 	if size != "" && size != "original" {
 		if thumbKey, ok := avatar.ThumbnailS3Keys[size]; ok {
@@ -202,7 +175,7 @@ func (s *avatarService) downloadBySize(ctx context.Context, avatar domain.Avatar
 }
 
 // GetMetadata возвращает метаданные аватарки.
-func (s *avatarService) GetMetadata(ctx context.Context, id uuid.UUID) (domain.Avatar, error) {
+func (s *AvatarService) GetMetadata(ctx context.Context, id uuid.UUID) (domain.Avatar, error) {
 	avatar, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return domain.Avatar{}, mapRepoError(err)
@@ -212,12 +185,12 @@ func (s *avatarService) GetMetadata(ctx context.Context, id uuid.UUID) (domain.A
 }
 
 // List возвращает все аватарки пользователя.
-func (s *avatarService) List(ctx context.Context, userID string) ([]domain.Avatar, error) {
+func (s *AvatarService) List(ctx context.Context, userID string) ([]domain.Avatar, error) {
 	return s.repo.ListByUserID(ctx, userID)
 }
 
 // Delete помечает аватарку удалённой и публикует событие на удаление файлов.
-func (s *avatarService) Delete(ctx context.Context, id uuid.UUID, requesterID string) error {
+func (s *AvatarService) Delete(ctx context.Context, id uuid.UUID, requesterID string) error {
 	avatar, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return mapRepoError(err)
@@ -238,7 +211,7 @@ func (s *avatarService) Delete(ctx context.Context, id uuid.UUID, requesterID st
 }
 
 // DeleteUserAvatar удаляет последнюю аватарку пользователя.
-func (s *avatarService) DeleteUserAvatar(ctx context.Context, userID, requesterID string) error {
+func (s *AvatarService) DeleteUserAvatar(ctx context.Context, userID, requesterID string) error {
 	if userID != requesterID {
 		return ErrForbidden
 	}
@@ -254,7 +227,7 @@ func (s *avatarService) DeleteUserAvatar(ctx context.Context, userID, requesterI
 // publishDeleteEvent отправляет событие на удаление файлов из хранилища.
 // Ошибка публикации не влияет на результат запроса: запись уже помечена
 // удалённой и недоступна через API.
-func (s *avatarService) publishDeleteEvent(ctx context.Context, avatar domain.Avatar) {
+func (s *AvatarService) publishDeleteEvent(ctx context.Context, avatar domain.Avatar) {
 	keys := make([]string, 0, len(avatar.ThumbnailS3Keys)+1)
 	keys = append(keys, avatar.S3Key)
 	for _, key := range avatar.ThumbnailS3Keys {

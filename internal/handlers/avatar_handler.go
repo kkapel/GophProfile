@@ -1,28 +1,43 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/kkapel/GophProfile/internal/api"
+	"github.com/kkapel/GophProfile/internal/domain"
 	"github.com/kkapel/GophProfile/internal/services"
+	"github.com/kkapel/GophProfile/internal/storage"
 )
 
 // maxMultipartMemory — сколько данных формы держать в памяти,
 // остальное Go выгружает во временные файлы на диске.
 const maxMultipartMemory = 1 << 20 // 1 MB
 
+// AvatarService — операции над аватарками, необходимые обработчикам.
+type AvatarService interface {
+	Upload(ctx context.Context, in services.UploadInput) (domain.Avatar, error)
+	GetFile(ctx context.Context, id uuid.UUID, size string) (*storage.Object, error)
+	GetUserFile(ctx context.Context, userID, size string) (*storage.Object, error)
+	GetMetadata(ctx context.Context, id uuid.UUID) (domain.Avatar, error)
+	List(ctx context.Context, userID string) ([]domain.Avatar, error)
+	Delete(ctx context.Context, id uuid.UUID, requesterID string) error
+	DeleteUserAvatar(ctx context.Context, userID, requesterID string) error
+}
+
 // AvatarHandler реализует api.ServerInterface — REST API сервиса аватарок.
 type AvatarHandler struct {
-	service services.AvatarService
+	service AvatarService
 	log     *slog.Logger
 }
 
 // NewAvatarHandler создаёт обработчик REST API.
-func NewAvatarHandler(service services.AvatarService, log *slog.Logger) *AvatarHandler {
+func NewAvatarHandler(service AvatarService, log *slog.Logger) *AvatarHandler {
 	return &AvatarHandler{service: service, log: log}
 }
 

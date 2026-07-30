@@ -27,7 +27,7 @@ import (
 )
 
 // newRouter собирает роутер с REST API поверх переданного сервиса.
-func newRouter(service services.AvatarService) http.Handler {
+func newRouter(service handlers.AvatarService) http.Handler {
 	r := chi.NewRouter()
 	api.HandlerFromMuxWithBaseURL(handlers.NewAvatarHandler(service, slog.New(slog.DiscardHandler)), r, "/api/v1")
 

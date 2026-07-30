@@ -17,13 +17,13 @@ import (
 
 // WebHandler отдаёт веб-интерфейс: форму загрузки и галерею.
 type WebHandler struct {
-	service   services.AvatarService
+	service   AvatarService
 	templates *template.Template
 	log       *slog.Logger
 }
 
 // NewWebHandler создаёт обработчик веб-интерфейса и разбирает шаблоны.
-func NewWebHandler(service services.AvatarService, log *slog.Logger) (*WebHandler, error) {
+func NewWebHandler(service AvatarService, log *slog.Logger) (*WebHandler, error) {
 	templates, err := template.ParseFS(web.StaticFS, "static/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
