@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"time"
 
@@ -41,16 +42,23 @@ type AvatarRepository interface {
 		thumbnails map[string]string, width, height int32) (domain.Avatar, error)
 }
 
+// FileStorage — операции над файлами, необходимые worker'у.
+type FileStorage interface {
+	Download(ctx context.Context, key string) (*storage.Object, error)
+	Upload(ctx context.Context, key string, r io.Reader, size int64, contentType string) error
+	DeleteMany(ctx context.Context, keys []string) error
+}
+
 // Worker обрабатывает события создания миниатюр и удаления файлов.
 type Worker struct {
 	repo    AvatarRepository
-	storage storage.FileStorage
+	storage FileStorage
 	broker  *broker.RabbitMQ
 	log     *slog.Logger
 }
 
 // New создаёт worker.
-func New(repo AvatarRepository, store storage.FileStorage, b *broker.RabbitMQ, log *slog.Logger) *Worker {
+func New(repo AvatarRepository, store FileStorage, b *broker.RabbitMQ, log *slog.Logger) *Worker {
 	return &Worker{repo: repo, storage: store, broker: b, log: log}
 }
 

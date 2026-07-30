@@ -22,32 +22,9 @@ type Object struct {
 	Size int64
 }
 
-// FileStorage описывает операции над файлами в объектном хранилище.
-// Сервисы зависят от этого интерфейса, а не от MinIO напрямую —
-// так его легко подменить моком в тестах.
-type FileStorage interface {
-	// Upload сохраняет объект по указанному ключу.
-	Upload(ctx context.Context, key string, r io.Reader, size int64, contentType string) error
-
-	// Download возвращает объект по ключу.
-	// Вызывающий обязан закрыть Object.Body.
-	Download(ctx context.Context, key string) (*Object, error)
-
-	// Delete удаляет объект по ключу.
-	Delete(ctx context.Context, key string) error
-
-	// DeleteMany удаляет несколько объектов.
-	DeleteMany(ctx context.Context, keys []string) error
-
-	// Ping проверяет доступность хранилища.
-	Ping(ctx context.Context) error
-}
-
-// minioStorage — реализация FileStorage поверх MinIO/S3.
-type minioStorage struct {
-	// client — сам SDK-клиент, потокобезопасен, создаётся один раз на всё приложение.
+// Storage — объектное хранилище, совместимое с S3.
+type Storage struct {
 	client *minio.Client
-	// bucket — имя бакета, в котором лежат все наши файлы (у нас один: "avatars").
 	bucket string
 }
 
@@ -61,7 +38,7 @@ type Config struct {
 }
 
 // New создаёт клиент хранилища и при необходимости создаёт бакет.
-func New(ctx context.Context, cfg Config) (*minioStorage, error) {
+func New(ctx context.Context, cfg Config) (*Storage, error) {
 	// minio.New только конструирует клиента и валидирует параметры —
 	// сетевого подключения здесь ещё НЕ происходит.
 	client, err := minio.New(cfg.Endpoint, &minio.Options{
@@ -75,7 +52,7 @@ func New(ctx context.Context, cfg Config) (*minioStorage, error) {
 		return nil, fmt.Errorf("create minio client: %w", err)
 	}
 
-	s := &minioStorage{client: client, bucket: cfg.Bucket}
+	s := &Storage{client: client, bucket: cfg.Bucket}
 
 	// Первый реальный поход в сеть.
 	if err := s.ensureBucket(ctx); err != nil {
@@ -87,7 +64,7 @@ func New(ctx context.Context, cfg Config) (*minioStorage, error) {
 
 // ensureBucket создаёт бакет, если он ещё не существует.
 // Без этого первая же загрузка упадёт с ошибкой NoSuchBucket.
-func (s *minioStorage) ensureBucket(ctx context.Context) error {
+func (s *Storage) ensureBucket(ctx context.Context) error {
 	// BucketExists делает HEAD-запрос к бакету.
 	// Ошибка здесь означает проблему с сетью или доступом, а не отсутствие бакета.
 	exists, err := s.client.BucketExists(ctx, s.bucket)
@@ -110,7 +87,7 @@ func (s *minioStorage) ensureBucket(ctx context.Context) error {
 // Upload сохраняет объект по указанному ключу.
 // key — это полное имя объекта, например "avatars/<uuid>/original.jpg".
 // Слэши в нём — просто часть имени, настоящих папок в S3 нет.
-func (s *minioStorage) Upload(ctx context.Context, key string, r io.Reader, size int64, contentType string) error {
+func (s *Storage) Upload(ctx context.Context, key string, r io.Reader, size int64, contentType string) error {
 	// PutObject читает данные из r и заливает их в бакет.
 	// size — ожидаемый размер в байтах. Если он неизвестен, передают -1,
 	// тогда SDK грузит файл частями (multipart) и потребляет больше памяти.
@@ -129,7 +106,7 @@ func (s *minioStorage) Upload(ctx context.Context, key string, r io.Reader, size
 }
 
 // Download возвращает объект по ключу.
-func (s *minioStorage) Download(ctx context.Context, key string) (*Object, error) {
+func (s *Storage) Download(ctx context.Context, key string) (*Object, error) {
 	// ВАЖНО: GetObject ленивый — он НЕ делает сетевой запрос и почти никогда
 	// не возвращает ошибку здесь. Он лишь готовит объект-ридер.
 	obj, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
@@ -155,7 +132,7 @@ func (s *minioStorage) Download(ctx context.Context, key string) (*Object, error
 }
 
 // Delete удаляет объект по ключу.
-func (s *minioStorage) Delete(ctx context.Context, key string) error {
+func (s *Storage) Delete(ctx context.Context, key string) error {
 	// RemoveObject идемпотентен: удаление несуществующего ключа
 	// не считается ошибкой в S3. Это удобно для повторной обработки
 	// одного и того же события из очереди.
@@ -169,7 +146,7 @@ func (s *minioStorage) Delete(ctx context.Context, key string) error {
 // DeleteMany удаляет несколько объектов.
 // Здесь простой цикл: объектов у нас максимум три (оригинал + две миниатюры).
 // Для массовых удалений в SDK есть RemoveObjects с каналом ключей.
-func (s *minioStorage) DeleteMany(ctx context.Context, keys []string) error {
+func (s *Storage) DeleteMany(ctx context.Context, keys []string) error {
 	for _, key := range keys {
 		if err := s.Delete(ctx, key); err != nil {
 			return err
@@ -182,7 +159,7 @@ func (s *minioStorage) DeleteMany(ctx context.Context, keys []string) error {
 // Ping проверяет доступность хранилища.
 // Отдельного health-метода в SDK нет, поэтому используем самый дешёвый
 // запрос — проверку существования бакета. Заодно проверяются сеть и credentials.
-func (s *minioStorage) Ping(ctx context.Context) error {
+func (s *Storage) Ping(ctx context.Context) error {
 	if _, err := s.client.BucketExists(ctx, s.bucket); err != nil {
 		return fmt.Errorf("ping storage: %w", err)
 	}

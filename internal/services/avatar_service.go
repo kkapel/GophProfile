@@ -90,17 +90,24 @@ type AvatarService interface {
 	DeleteUserAvatar(ctx context.Context, userID, requesterID string) error
 }
 
+// FileStorage — операции над файлами, необходимые сервису.
+type FileStorage interface {
+	Upload(ctx context.Context, key string, r io.Reader, size int64, contentType string) error
+	Download(ctx context.Context, key string) (*storage.Object, error)
+	Delete(ctx context.Context, key string) error
+}
+
 // avatarService — реализация AvatarService.
 type avatarService struct {
 	repo      AvatarRepository
-	storage   storage.FileStorage
+	storage   FileStorage
 	publisher EventPublisher
 }
 
 // NewAvatarService создаёт сервис аватарок.
 func NewAvatarService(
 	repo AvatarRepository,
-	store storage.FileStorage,
+	store FileStorage,
 	publisher EventPublisher,
 ) *avatarService {
 	return &avatarService{repo: repo, storage: store, publisher: publisher}
