@@ -54,6 +54,15 @@ type UploadInput struct {
 	File io.ReadSeeker
 }
 
+// AvatarRepository — доступ к метаданным аватарок, необходимый сервису.
+type AvatarRepository interface {
+	Create(ctx context.Context, avatar domain.Avatar) (domain.Avatar, error)
+	GetByID(ctx context.Context, id uuid.UUID) (domain.Avatar, error)
+	GetLatestByUserID(ctx context.Context, userID string) (domain.Avatar, error)
+	ListByUserID(ctx context.Context, userID string) ([]domain.Avatar, error)
+	SoftDelete(ctx context.Context, id uuid.UUID) (domain.Avatar, error)
+}
+
 // AvatarService описывает операции над аватарками.
 type AvatarService interface {
 	// Upload сохраняет оригинал в хранилище, создаёт запись в БД
@@ -83,14 +92,14 @@ type AvatarService interface {
 
 // avatarService — реализация AvatarService.
 type avatarService struct {
-	repo      repository.AvatarRepository
+	repo      AvatarRepository
 	storage   storage.FileStorage
 	publisher EventPublisher
 }
 
 // NewAvatarService создаёт сервис аватарок.
 func NewAvatarService(
-	repo repository.AvatarRepository,
+	repo AvatarRepository,
 	store storage.FileStorage,
 	publisher EventPublisher,
 ) *avatarService {

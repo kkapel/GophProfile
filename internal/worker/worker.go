@@ -33,16 +33,24 @@ var thumbnailSizes = map[string][2]int{
 	domain.ThumbSize300: {300, 300},
 }
 
+// AvatarRepository — операции над метаданными, необходимые worker'у.
+type AvatarRepository interface {
+	GetByID(ctx context.Context, id uuid.UUID) (domain.Avatar, error)
+	UpdateProcessingStatus(ctx context.Context, id uuid.UUID, status string) error
+	UpdateProcessingResult(ctx context.Context, id uuid.UUID, status string,
+		thumbnails map[string]string, width, height int32) (domain.Avatar, error)
+}
+
 // Worker обрабатывает события создания миниатюр и удаления файлов.
 type Worker struct {
-	repo    repository.AvatarRepository
+	repo    AvatarRepository
 	storage storage.FileStorage
 	broker  *broker.RabbitMQ
 	log     *slog.Logger
 }
 
 // New создаёт worker.
-func New(repo repository.AvatarRepository, store storage.FileStorage, b *broker.RabbitMQ, log *slog.Logger) *Worker {
+func New(repo AvatarRepository, store storage.FileStorage, b *broker.RabbitMQ, log *slog.Logger) *Worker {
 	return &Worker{repo: repo, storage: store, broker: b, log: log}
 }
 
