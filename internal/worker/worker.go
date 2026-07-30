@@ -39,6 +39,8 @@ type AvatarRepository interface {
 	UpdateProcessingStatus(ctx context.Context, id uuid.UUID, status string) error
 	UpdateProcessingResult(ctx context.Context, id uuid.UUID, status string,
 		thumbnails map[string]string, width, height int32) (domain.Avatar, error)
+	IsEventProcessed(ctx context.Context, eventID uuid.UUID) (bool, error)
+	MarkEventProcessed(ctx context.Context, eventID uuid.UUID, eventType string) error
 }
 
 // FileStorage — операции над файлами, необходимые worker'у.
@@ -140,6 +142,14 @@ func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 		return nil
 	}
 
+	eventID, skip, err := w.checkEvent(ctx, event.EventID)
+	if err != nil {
+		return err
+	}
+	if skip {
+		return nil
+	}
+
 	avatarID, err := uuid.Parse(event.AvatarID)
 	if err != nil {
 		w.log.Error("skip event with invalid avatar id", "avatar_id", event.AvatarID, "err", err)
@@ -177,6 +187,11 @@ func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 	if _, err := w.repo.UpdateProcessingResult(
 		ctx, avatarID, domain.ProcessingStatusCompleted, thumbnails, width, height,
 	); err != nil {
+		return err
+	}
+
+	// Регистрация эвента только после успешной обработки
+	if err := w.repo.MarkEventProcessed(ctx, eventID, domain.EventAvatarUploaded); err != nil {
 		return err
 	}
 
@@ -231,12 +246,45 @@ func (w *Worker) handleDelete(ctx context.Context, body []byte) error {
 		return nil
 	}
 
+	eventID, skip, err := w.checkEvent(ctx, event.EventID)
+	if err != nil {
+		return err
+	}
+	if skip {
+		return nil
+	}
+
 	// Удаление в S3 идемпотентно: повторный вызов не вернёт ошибку.
 	if err := w.storage.DeleteMany(ctx, event.S3Keys); err != nil {
+		return err
+	}
+
+	if err := w.repo.MarkEventProcessed(ctx, eventID, domain.EventAvatarDeleted); err != nil {
 		return err
 	}
 
 	w.log.Info("avatar files deleted", "avatar_id", event.AvatarID, "keys", len(event.S3Keys))
 
 	return nil
+}
+
+// checkEvent разбирает идентификатор события и проверяет, не обработано ли оно.
+// Возвращает skip=true, если обработку нужно пропустить.
+func (w *Worker) checkEvent(ctx context.Context, eventID string) (id uuid.UUID, skip bool, err error) {
+	parsed, err := uuid.Parse(eventID)
+	if err != nil {
+		w.log.Error("skip event with invalid event id", "event_id", eventID, "err", err)
+		return uuid.Nil, true, nil
+	}
+
+	processed, err := w.repo.IsEventProcessed(ctx, parsed)
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	if processed {
+		w.log.Info("event already processed, skipping", "event_id", eventID)
+		return parsed, true, nil
+	}
+
+	return parsed, false, nil
 }

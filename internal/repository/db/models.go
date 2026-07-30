@@ -26,3 +26,9 @@ type Avatar struct {
 	UpdatedAt        time.Time  `json:"updated_at"`
 	DeletedAt        *time.Time `json:"deleted_at"`
 }
+
+type ProcessedEvent struct {
+	EventID     uuid.UUID `json:"event_id"`
+	EventType   string    `json:"event_type"`
+	ProcessedAt time.Time `json:"processed_at"`
+}

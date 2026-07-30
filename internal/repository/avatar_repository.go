@@ -187,3 +187,25 @@ func toDomain(row db.Avatar) (domain.Avatar, error) {
 		DeletedAt:        row.DeletedAt,
 	}, nil
 }
+
+// IsEventProcessed сообщает, было ли событие уже обработано.
+func (r *AvatarRepository) IsEventProcessed(ctx context.Context, eventID uuid.UUID) (bool, error) {
+	processed, err := r.queries.IsEventProcessed(ctx, eventID)
+	if err != nil {
+		return false, fmt.Errorf("check processed event: %w", err)
+	}
+
+	return processed, nil
+}
+
+// MarkEventProcessed регистрирует событие как обработанное.
+func (r *AvatarRepository) MarkEventProcessed(ctx context.Context, eventID uuid.UUID, eventType string) error {
+	if err := r.queries.MarkEventProcessed(ctx, db.MarkEventProcessedParams{
+		EventID:   eventID,
+		EventType: eventType,
+	}); err != nil {
+		return fmt.Errorf("mark event processed: %w", err)
+	}
+
+	return nil
+}
