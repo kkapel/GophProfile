@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +29,7 @@ import (
 // newRouter собирает роутер с REST API поверх переданного сервиса.
 func newRouter(service services.AvatarService) http.Handler {
 	r := chi.NewRouter()
-	api.HandlerFromMuxWithBaseURL(handlers.NewAvatarHandler(service), r, "/api/v1")
+	api.HandlerFromMuxWithBaseURL(handlers.NewAvatarHandler(service, slog.New(slog.DiscardHandler)), r, "/api/v1")
 
 	return r
 }

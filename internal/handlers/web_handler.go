@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -18,16 +19,17 @@ import (
 type WebHandler struct {
 	service   services.AvatarService
 	templates *template.Template
+	log       *slog.Logger
 }
 
 // NewWebHandler создаёт обработчик веб-интерфейса и разбирает шаблоны.
-func NewWebHandler(service services.AvatarService) (*WebHandler, error) {
+func NewWebHandler(service services.AvatarService, log *slog.Logger) (*WebHandler, error) {
 	templates, err := template.ParseFS(web.StaticFS, "static/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
 
-	return &WebHandler{service: service, templates: templates}, nil
+	return &WebHandler{service: service, templates: templates, log: log}, nil
 }
 
 // galleryItem — одна аватарка в галерее.
@@ -98,7 +100,7 @@ func (h *WebHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		File:     file,
 	})
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, h.log, err)
 		return
 	}
 
@@ -111,6 +113,7 @@ func (h *WebHandler) GalleryPage(w http.ResponseWriter, r *http.Request) {
 
 	avatars, err := h.service.List(r.Context(), userID)
 	if err != nil {
+		h.log.Error("list avatars for gallery", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -132,6 +135,7 @@ func (h *WebHandler) render(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	if err := h.templates.ExecuteTemplate(w, name, data); err != nil {
+		h.log.Error("render template", "template", name, "err", err)
 		http.Error(w, "template error", http.StatusInternalServerError)
 	}
 }

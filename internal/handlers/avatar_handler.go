@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/kkapel/GophProfile/internal/api"
@@ -17,11 +18,12 @@ const maxMultipartMemory = 1 << 20 // 1 MB
 // AvatarHandler реализует api.ServerInterface — REST API сервиса аватарок.
 type AvatarHandler struct {
 	service services.AvatarService
+	log     *slog.Logger
 }
 
 // NewAvatarHandler создаёт обработчик REST API.
-func NewAvatarHandler(service services.AvatarService) *AvatarHandler {
-	return &AvatarHandler{service: service}
+func NewAvatarHandler(service services.AvatarService, log *slog.Logger) *AvatarHandler {
+	return &AvatarHandler{service: service, log: log}
 }
 
 // UploadAvatar обрабатывает POST /api/v1/avatars.
@@ -65,7 +67,7 @@ func (h *AvatarHandler) UploadAvatar(w http.ResponseWriter, r *http.Request, par
 		File:     file,
 	})
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, h.log, err)
 		return
 	}
 
@@ -81,7 +83,7 @@ func (h *AvatarHandler) GetAvatar(w http.ResponseWriter, r *http.Request, avatar
 
 	obj, err := h.service.GetFile(r.Context(), avatarID, size)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, h.log, err)
 		return
 	}
 	defer func() {
@@ -100,7 +102,7 @@ func (h *AvatarHandler) GetUserAvatar(w http.ResponseWriter, r *http.Request, us
 
 	obj, err := h.service.GetUserFile(r.Context(), userID, size)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, h.log, err)
 		return
 	}
 	defer func() {
@@ -114,7 +116,7 @@ func (h *AvatarHandler) GetUserAvatar(w http.ResponseWriter, r *http.Request, us
 func (h *AvatarHandler) GetAvatarMetadata(w http.ResponseWriter, r *http.Request, avatarID api.AvatarID) {
 	avatar, err := h.service.GetMetadata(r.Context(), avatarID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, h.log, err)
 		return
 	}
 
@@ -125,7 +127,7 @@ func (h *AvatarHandler) GetAvatarMetadata(w http.ResponseWriter, r *http.Request
 func (h *AvatarHandler) ListUserAvatars(w http.ResponseWriter, r *http.Request, userID api.UserID) {
 	avatars, err := h.service.List(r.Context(), userID)
 	if err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, h.log, err)
 		return
 	}
 
@@ -140,7 +142,7 @@ func (h *AvatarHandler) ListUserAvatars(w http.ResponseWriter, r *http.Request, 
 // DeleteAvatar обрабатывает DELETE /api/v1/avatars/{avatar_id}.
 func (h *AvatarHandler) DeleteAvatar(w http.ResponseWriter, r *http.Request, avatarID api.AvatarID, params api.DeleteAvatarParams) {
 	if err := h.service.Delete(r.Context(), avatarID, params.XUserID); err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, h.log, err)
 		return
 	}
 
@@ -150,7 +152,7 @@ func (h *AvatarHandler) DeleteAvatar(w http.ResponseWriter, r *http.Request, ava
 // DeleteUserAvatar обрабатывает DELETE /api/v1/users/{user_id}/avatar.
 func (h *AvatarHandler) DeleteUserAvatar(w http.ResponseWriter, r *http.Request, userID api.UserID, params api.DeleteUserAvatarParams) {
 	if err := h.service.DeleteUserAvatar(r.Context(), userID, params.XUserID); err != nil {
-		writeServiceError(w, err)
+		writeServiceError(w, h.log, err)
 		return
 	}
 
@@ -173,7 +175,7 @@ func writeImage(w http.ResponseWriter, contentType string, size int64, body io.R
 }
 
 // writeServiceError переводит ошибки сервисного слоя в HTTP-ответы.
-func writeServiceError(w http.ResponseWriter, err error) {
+func writeServiceError(w http.ResponseWriter, log *slog.Logger, err error) {
 	switch {
 	case errors.Is(err, services.ErrNotFound):
 		writeError(w, http.StatusNotFound, "Avatar not found", "")
@@ -188,6 +190,7 @@ func writeServiceError(w http.ResponseWriter, err error) {
 			MaxSize: &maxSize,
 		})
 	default:
+		log.Error("unexpected service error", "err", err)
 		writeError(w, http.StatusInternalServerError, "Internal server error", "")
 	}
 }

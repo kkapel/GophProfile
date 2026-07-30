@@ -83,9 +83,9 @@ func run() error {
 	// Сборка слоёв приложения
 	avatarRepo := repository.NewAvatarRepository(db.Pool)
 	avatarService := services.NewAvatarService(avatarRepo, store, rabbit)
-	avatarHandler := handlers.NewAvatarHandler(avatarService)
+	avatarHandler := handlers.NewAvatarHandler(avatarService, log)
 
-	webHandler, err := handlers.NewWebHandler(avatarService)
+	webHandler, err := handlers.NewWebHandler(avatarService, log)
 	if err != nil {
 		return fmt.Errorf("init web handler: %w", err)
 	}
