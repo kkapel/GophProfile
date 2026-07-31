@@ -1,0 +1,287 @@
+openapi: 3.0.3
+info:
+  title: GophProfile Avatars API
+  description: Сервис загрузки, обработки и выдачи аватарок пользователей.
+  version: "1.0.0"
+
+servers:
+  - url: /api/v1
+
+tags:
+  - name: avatars
+  - name: users
+
+paths:
+  /avatars:
+    post:
+      tags: [avatars]
+      operationId: uploadAvatar
+      summary: Загрузка аватарки
+      parameters:
+        - $ref: '#/components/parameters/UserIDHeader'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Аватарка принята в обработку
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Avatar' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /avatars/{avatar_id}:
+    get:
+      tags: [avatars]
+      operationId: getAvatar
+      summary: Получение файла аватарки
+      parameters:
+        - $ref: '#/components/parameters/AvatarID'
+        - $ref: '#/components/parameters/SizeQuery'
+      responses:
+        '200':
+          description: Бинарные данные изображения
+          headers:
+            Cache-Control:
+              schema: { type: string }
+            ETag:
+              schema: { type: string }
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/png:
+              schema: { type: string, format: binary }
+            image/webp:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    delete:
+      tags: [avatars]
+      operationId: deleteAvatar
+      summary: Удаление аватарки
+      parameters:
+        - $ref: '#/components/parameters/AvatarID'
+        - $ref: '#/components/parameters/UserIDHeader'
+      responses:
+        '204':
+          description: Аватарка удалена
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /avatars/{avatar_id}/metadata:
+    get:
+      tags: [avatars]
+      operationId: getAvatarMetadata
+      summary: Получение метаданных аватарки
+      parameters:
+        - $ref: '#/components/parameters/AvatarID'
+      responses:
+        '200':
+          description: Метаданные аватарки
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AvatarMetadata' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /users/{user_id}/avatar:
+    get:
+      tags: [users]
+      operationId: getUserAvatar
+      summary: Получение текущей аватарки пользователя
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/SizeQuery'
+      responses:
+        '200':
+          description: Бинарные данные изображения
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/png:
+              schema: { type: string, format: binary }
+            image/webp:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    delete:
+      tags: [users]
+      operationId: deleteUserAvatar
+      summary: Удаление текущей аватарки пользователя
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/UserIDHeader'
+      responses:
+        '204':
+          description: Аватарка удалена
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /users/{user_id}/avatars:
+    get:
+      tags: [users]
+      operationId: listUserAvatars
+      summary: Список аватарок пользователя
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          description: Список аватарок
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Avatar' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+components:
+  parameters:
+    AvatarID:
+      name: avatar_id
+      in: path
+      required: true
+      description: Идентификатор аватарки
+      schema: { type: string, format: uuid }
+
+    UserID:
+      name: user_id
+      in: path
+      required: true
+      description: Идентификатор пользователя
+      schema: { type: string }
+
+    UserIDHeader:
+      name: X-User-ID
+      in: header
+      required: true
+      description: Идентификатор пользователя, выполняющего запрос
+      schema: { type: string }
+
+    SizeQuery:
+      name: size
+      in: query
+      required: false
+      description: Требуемый размер изображения
+      schema:
+        type: string
+        enum: ["100x100", "300x300", "original"]
+        default: "original"
+
+  responses:
+    BadRequest:
+      description: Некорректный запрос
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Доступ запрещён
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PayloadTooLarge:
+      description: Файл превышает допустимый размер
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InternalError:
+      description: Внутренняя ошибка сервера
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Avatar:
+      type: object
+      required: [id, user_id, url, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+        url:
+          type: string
+          description: Ссылка на файл аватарки
+        status:
+          type: string
+          enum: [processing, completed, failed]
+        created_at:
+          type: string
+          format: date-time
+
+    Thumbnail:
+      type: object
+      required: [size, url]
+      properties:
+        size:
+          type: string
+          example: "100x100"
+        url:
+          type: string
+
+    Dimensions:
+      type: object
+      required: [width, height]
+      properties:
+        width: { type: integer }
+        height: { type: integer }
+
+    AvatarMetadata:
+      type: object
+      required: [id, user_id, file_name, mime_type, size, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+        file_name:
+          type: string
+        mime_type:
+          type: string
+        size:
+          type: integer
+          format: int64
+        dimensions:
+          $ref: '#/components/schemas/Dimensions'
+        thumbnails:
+          type: array
+          items: { $ref: '#/components/schemas/Thumbnail' }
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        details:
+          type: string
+        max_size:
+          type: integer
+          format: int64
+          description: Максимальный размер файла в байтах (для ответа 413)

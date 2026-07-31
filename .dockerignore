@@ -1,0 +1,7 @@
+.git
+.github
+*.md
+coverage.out
+image/
+env.ps1
+.env

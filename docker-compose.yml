@@ -1,0 +1,101 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gophprofile-postgres
+    environment:
+      POSTGRES_USER: gophprofile
+      POSTGRES_PASSWORD: gophprofile
+      POSTGRES_DB: gophprofile
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gophprofile -d gophprofile"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: gophprofile-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # веб-консоль
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:4.3.4-management-alpine
+    container_name: gophprofile-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # веб-интерфейс
+    volumes:
+      - rabbitdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  server:
+    build: .
+    container_name: gophprofile-server
+    command: ["./server"]
+    environment:
+      GOPHPROFILE_HTTP_ADDRESS: ":8080"
+      GOPHPROFILE_LOGGER_LEVEL: "INFO"
+      GOPHPROFILE_DATABASE_URL: "postgres://gophprofile:gophprofile@postgres:5432/gophprofile?sslmode=disable"
+      GOPHPROFILE_MIGRATIONS_PATH: "migrations"
+      GOPHPROFILE_MINIO_ENDPOINT: "minio:9000"
+      GOPHPROFILE_MINIO_ACCESS_KEY: "minioadmin"
+      GOPHPROFILE_MINIO_SECRET_KEY: "minioadmin"
+      GOPHPROFILE_MINIO_BUCKET: "avatars"
+      GOPHPROFILE_RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+  worker:
+    build: .
+    container_name: gophprofile-worker
+    command: ["./worker"]
+    environment:
+      GOPHPROFILE_LOGGER_LEVEL: "INFO"
+      GOPHPROFILE_DATABASE_URL: "postgres://gophprofile:gophprofile@postgres:5432/gophprofile?sslmode=disable"
+      GOPHPROFILE_MINIO_ENDPOINT: "minio:9000"
+      GOPHPROFILE_MINIO_ACCESS_KEY: "minioadmin"
+      GOPHPROFILE_MINIO_SECRET_KEY: "minioadmin"
+      GOPHPROFILE_MINIO_BUCKET: "avatars"
+      GOPHPROFILE_RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+    depends_on:
+      server:
+        condition: service_healthy    
+
+volumes:
+  pgdata:
+  miniodata:
+  rabbitdata:
