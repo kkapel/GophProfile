@@ -109,6 +109,7 @@ func run() error {
 	r := chi.NewRouter()
 	// Добавить хэндлеры
 	r.Use(middleware.RequestID)
+	r.Use(handlers.LoggingMiddleware(log.With("layer", "http")))
 	r.Use(middleware.Recoverer)
 
 	// Веб-интерфейс
