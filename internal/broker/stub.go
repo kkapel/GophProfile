@@ -16,8 +16,8 @@ func NewStubPublisher() *StubPublisher {
 }
 
 // Publish логирует событие вместо отправки в брокер.
-func (p *StubPublisher) Publish(_ context.Context, routingKey string, event any, log *slog.Logger) error {
-	log.Info("event published (stub)", "routing_key", routingKey, "event", event)
+func (p *StubPublisher) Publish(ctx context.Context, routingKey string, event any, log *slog.Logger) error {
+	log.InfoContext(ctx, "event published (stub)", "routing_key", routingKey, "event", event)
 
 	return nil
 }

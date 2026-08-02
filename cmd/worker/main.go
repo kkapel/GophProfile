@@ -81,13 +81,13 @@ func run() error {
 	avatarRepo := repository.NewAvatarRepository(db.Pool)
 	w := worker.New(avatarRepo, store, rabbit, log)
 
-	log.Info("worker started")
+	log.InfoContext(ctx, "worker started")
 
 	if err := w.Run(ctx); err != nil {
 		return fmt.Errorf("worker run: %w", err)
 	}
 
-	log.Info("worker stopped")
+	log.InfoContext(ctx, "worker stopped")
 
 	return nil
 }

@@ -57,7 +57,7 @@ func run() error {
 	}()
 
 	log = log.With("component", "server")
-	log.Info("logger initialized")
+	log.InfoContext(ctx, "logger initialized")
 
 	// Подключение к PostgreSQL и применение миграций
 	db, err := database.New(ctx, cfg.DatabaseURL, cfg.MigrationsPath)
@@ -65,7 +65,7 @@ func run() error {
 		return fmt.Errorf("init database: %w", err)
 	}
 	defer db.Close()
-	log.Info("database connected, migrations applied")
+	log.InfoContext(ctx, "database connected, migrations applied")
 
 	// Подключение к объектному хранилищу
 	store, err := storage.New(ctx, storage.Config{
@@ -78,7 +78,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("init storage: %w", err)
 	}
-	log.Info("storage connected", "bucket", cfg.MinioBucket)
+	log.InfoContext(ctx, "storage connected", "bucket", cfg.MinioBucket)
 
 	// Подключение к брокеру сообщений
 	rabbit, err := broker.NewRabbitMQ(cfg.RabbitMQURL)
@@ -88,7 +88,7 @@ func run() error {
 	defer func() {
 		_ = rabbit.Close()
 	}()
-	log.Info("broker connected")
+	log.InfoContext(ctx, "broker connected")
 
 	// Сборка слоёв приложения
 	avatarRepo := repository.NewAvatarRepository(db.Pool)
@@ -136,7 +136,7 @@ func run() error {
 	// Запуск в отдельной горутине, чтобы не блокировать ожидание сигнала.
 	srvErr := make(chan error, 1)
 	go func() {
-		log.Info("server started", "addr", cfg.HTTPAddress)
+		log.InfoContext(ctx, "server started", "addr", cfg.HTTPAddress)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("server error", "err", err)
 			srvErr <- err
@@ -153,14 +153,14 @@ func run() error {
 	case <-signalCtx.Done():
 	}
 
-	log.Info("shutting down")
+	log.InfoContext(ctx, "shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
-	log.Info("stopped")
+	log.InfoContext(ctx, "stopped")
 
 	return nil
 }

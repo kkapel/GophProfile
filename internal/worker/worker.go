@@ -76,7 +76,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		return err
 	}
 
-	w.log.Info("worker consuming", "queues", []string{broker.QueueProcess, broker.QueueDelete})
+	w.log.InfoContext(ctx, "worker consuming", "queues", []string{broker.QueueProcess, broker.QueueDelete})
 
 	for {
 		select {
@@ -160,7 +160,7 @@ func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			// Аватарку уже удалили — обрабатывать нечего.
-			w.log.Info("avatar not found, skipping", "avatar_id", event.AvatarID)
+			w.log.InfoContext(ctx, "avatar not found, skipping", "avatar_id", event.AvatarID)
 			return nil
 		}
 		return err
@@ -169,7 +169,7 @@ func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 	// Идемпотентность: повторная доставка того же события
 	// не должна выполнять работу заново.
 	if avatar.ProcessingStatus == domain.ProcessingStatusCompleted {
-		w.log.Info("avatar already processed, skipping", "avatar_id", event.AvatarID)
+		w.log.InfoContext(ctx, "avatar already processed, skipping", "avatar_id", event.AvatarID)
 		return nil
 	}
 
@@ -195,7 +195,7 @@ func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 		return err
 	}
 
-	w.log.Info("avatar processed", "avatar_id", event.AvatarID, "thumbnails", len(thumbnails))
+	w.log.InfoContext(ctx, "avatar processed", "avatar_id", event.AvatarID, "thumbnails", len(thumbnails))
 
 	return nil
 }
@@ -263,7 +263,7 @@ func (w *Worker) handleDelete(ctx context.Context, body []byte) error {
 		return err
 	}
 
-	w.log.Info("avatar files deleted", "avatar_id", event.AvatarID, "keys", len(event.S3Keys))
+	w.log.InfoContext(ctx, "avatar files deleted", "avatar_id", event.AvatarID, "keys", len(event.S3Keys))
 
 	return nil
 }
@@ -282,7 +282,7 @@ func (w *Worker) checkEvent(ctx context.Context, eventID string) (id uuid.UUID, 
 		return uuid.Nil, false, err
 	}
 	if processed {
-		w.log.Info("event already processed, skipping", "event_id", eventID)
+		w.log.InfoContext(ctx, "event already processed, skipping", "event_id", eventID)
 		return parsed, true, nil
 	}
 
