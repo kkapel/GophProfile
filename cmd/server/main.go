@@ -39,15 +39,25 @@ func run() error {
 		return err
 	}
 
+	ctx := context.Background()
+
 	// Логгер
-	log, err := logger.New(cfg.LoggerLevel)
+	log, shutdownLogger, err := logger.New(ctx, "gophprofile-server", "1.0.0", cfg.LoggerLevel)
 	if err != nil {
 		return err
 	}
+
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := shutdownLogger(shutdownCtx); err != nil {
+			slog.Error("shutdown logger", "err", err)
+		}
+	}()
+
 	log = log.With("component", "server")
 	log.Info("logger initialized")
-
-	ctx := context.Background()
 
 	// Подключение к PostgreSQL и применение миграций
 	db, err := database.New(ctx, cfg.DatabaseURL, cfg.MigrationsPath)

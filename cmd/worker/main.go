@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/kkapel/GophProfile/internal/broker"
 	"github.com/kkapel/GophProfile/internal/config"
@@ -32,10 +33,20 @@ func run() error {
 		return err
 	}
 
-	log, err := logger.New(cfg.LoggerLevel)
+	log, shutdownLogger, err := logger.New(context.Background(), "gophprofile-worker", "1.0.0", cfg.LoggerLevel)
 	if err != nil {
 		return err
 	}
+
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := shutdownLogger(shutdownCtx); err != nil {
+			slog.Error("shutdown logger", "err", err)
+		}
+	}()
+
 	log = log.With("component", "worker")
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
