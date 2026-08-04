@@ -138,7 +138,7 @@ func run() error {
 	go func() {
 		log.InfoContext(ctx, "server started", "addr", cfg.HTTPAddress)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("server error", "err", err)
+			log.ErrorContext(ctx, "server error", "err", err)
 			srvErr <- err
 		}
 	}()

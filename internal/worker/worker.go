@@ -107,12 +107,12 @@ func (w *Worker) process(ctx context.Context, delivery amqp.Delivery, handler fu
 		if err = handler(ctx, delivery.Body); err == nil {
 			// Подтверждаем обработку: сообщение удаляется из очереди.
 			if ackErr := delivery.Ack(false); ackErr != nil {
-				w.log.Error("ack message", "err", ackErr)
+				w.log.ErrorContext(ctx, "ack message", "err", ackErr)
 			}
 			return
 		}
 
-		w.log.Warn("handle message failed", "attempt", attempt, "err", err)
+		w.log.WarnContext(ctx, "handle message failed", "attempt", attempt, "err", err)
 
 		if attempt < maxAttempts {
 			// Экспоненциальная задержка: 1с, 2с, 4с...
@@ -125,12 +125,12 @@ func (w *Worker) process(ctx context.Context, delivery amqp.Delivery, handler fu
 		}
 	}
 
-	w.log.Error("message dropped after retries", "err", err)
+	w.log.ErrorContext(ctx, "message dropped after retries", "err", err)
 
 	// requeue=false: сообщение не возвращается в очередь, иначе
 	// оно будет обрабатываться бесконечно.
 	if nackErr := delivery.Nack(false, false); nackErr != nil {
-		w.log.Error("nack message", "err", nackErr)
+		w.log.ErrorContext(ctx, "nack message", "err", nackErr)
 	}
 }
 
@@ -138,7 +138,7 @@ func (w *Worker) process(ctx context.Context, delivery amqp.Delivery, handler fu
 func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 	var event domain.AvatarUploadEvent
 	if err := json.Unmarshal(body, &event); err != nil {
-		w.log.Error("skip malformed upload event", "err", err)
+		w.log.ErrorContext(ctx, "skip malformed upload event", "err", err)
 		return nil
 	}
 
@@ -152,7 +152,7 @@ func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 
 	avatarID, err := uuid.Parse(event.AvatarID)
 	if err != nil {
-		w.log.Error("skip event with invalid avatar id", "avatar_id", event.AvatarID, "err", err)
+		w.log.ErrorContext(ctx, "skip event with invalid avatar id", "avatar_id", event.AvatarID, "err", err)
 		return nil
 	}
 
@@ -242,7 +242,7 @@ func (w *Worker) makeThumbnails(ctx context.Context, avatarID, s3Key string) (
 func (w *Worker) handleDelete(ctx context.Context, body []byte) error {
 	var event domain.AvatarDeleteEvent
 	if err := json.Unmarshal(body, &event); err != nil {
-		w.log.Error("skip malformed delete event", "err", err)
+		w.log.ErrorContext(ctx, "skip malformed delete event", "err", err)
 		return nil
 	}
 
@@ -273,7 +273,7 @@ func (w *Worker) handleDelete(ctx context.Context, body []byte) error {
 func (w *Worker) checkEvent(ctx context.Context, eventID string) (id uuid.UUID, skip bool, err error) {
 	parsed, err := uuid.Parse(eventID)
 	if err != nil {
-		w.log.Error("skip event with invalid event id", "event_id", eventID, "err", err)
+		w.log.ErrorContext(ctx, "skip event with invalid event id", "event_id", eventID, "err", err)
 		return uuid.Nil, true, nil
 	}
 
