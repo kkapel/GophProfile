@@ -92,7 +92,7 @@ func run() error {
 
 	// Сборка слоёв приложения
 	avatarRepo := repository.NewAvatarRepository(db.Pool)
-	avatarService := services.NewAvatarService(avatarRepo, store, rabbit)
+	avatarService := services.NewAvatarService(avatarRepo, store, rabbit, log.With("layer", "service"))
 	avatarHandler := handlers.NewAvatarHandler(avatarService, log)
 
 	webHandler, err := handlers.NewWebHandler(avatarService, log)

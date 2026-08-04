@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -75,6 +76,7 @@ type AvatarService struct {
 	repo      AvatarRepository
 	storage   FileStorage
 	publisher EventPublisher
+	log       *slog.Logger
 }
 
 // NewAvatarService создаёт сервис аватарок.
@@ -82,8 +84,9 @@ func NewAvatarService(
 	repo AvatarRepository,
 	store FileStorage,
 	publisher EventPublisher,
+	log *slog.Logger,
 ) *AvatarService {
-	return &AvatarService{repo: repo, storage: store, publisher: publisher}
+	return &AvatarService{repo: repo, storage: store, publisher: publisher, log: log}
 }
 
 // Upload сохраняет оригинал в хранилище, создаёт запись в БД
@@ -101,6 +104,14 @@ func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (domain.Avat
 	avatarID := uuid.New()
 	key := storage.OriginalKey(avatarID.String(), ext)
 
+	s.log.InfoContext(ctx, "uploading avatar",
+		"avatar_id", avatarID,
+		"user_id", in.UserID,
+		"file_name", in.FileName,
+		"file_size", in.Size,
+		"mime_type", mimeType,
+	)
+
 	if err := s.storage.Upload(ctx, key, in.File, in.Size, mimeType); err != nil {
 		return domain.Avatar{}, fmt.Errorf("upload to storage: %w", err)
 	}
@@ -117,7 +128,9 @@ func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (domain.Avat
 	})
 	if err != nil {
 		// Файл уже в хранилище — убираем его, чтобы не оставлять мусор.
-		_ = s.storage.Delete(ctx, key)
+		if delErr := s.storage.Delete(ctx, key); err != nil {
+			s.log.ErrorContext(ctx, "cleanup uploaded file", "s3_key", key, "err", delErr)
+		}
 		return domain.Avatar{}, err
 	}
 
@@ -130,8 +143,13 @@ func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (domain.Avat
 	if err := s.publisher.Publish(ctx, domain.EventAvatarUploaded, event); err != nil {
 		// Запись создана и файл загружен, поэтому запрос считаем успешным.
 		// Миниатюры останутся в статусе pending до повторной обработки.
+		s.log.ErrorContext(ctx, "publish upload event",
+			"avatar_id", avatarID, "err", err)
 		return avatar, nil
 	}
+
+	s.log.InfoContext(ctx, "avatar accepted",
+		"avatar_id", avatarID, "user_id", in.UserID, "s3_key", key)
 
 	return avatar, nil
 }
@@ -197,6 +215,9 @@ func (s *AvatarService) Delete(ctx context.Context, id uuid.UUID, requesterID st
 	}
 
 	if avatar.UserID != requesterID {
+		s.log.WarnContext(ctx, "avatar delete forbidden",
+			"avatar_id", id, "owner_id", avatar.UserID, "requester_id", requesterID)
+
 		return ErrForbidden
 	}
 
@@ -206,6 +227,8 @@ func (s *AvatarService) Delete(ctx context.Context, id uuid.UUID, requesterID st
 	}
 
 	s.publishDeleteEvent(ctx, deleted)
+
+	s.log.InfoContext(ctx, "avatar deleted", "avatar_id", id, "user_id", requesterID)
 
 	return nil
 }
@@ -234,11 +257,14 @@ func (s *AvatarService) publishDeleteEvent(ctx context.Context, avatar domain.Av
 		keys = append(keys, key)
 	}
 
-	_ = s.publisher.Publish(ctx, domain.EventAvatarDeleted, domain.AvatarDeleteEvent{
+	err := s.publisher.Publish(ctx, domain.EventAvatarDeleted, domain.AvatarDeleteEvent{
 		EventID:  uuid.NewString(),
 		AvatarID: avatar.ID.String(),
 		S3Keys:   keys,
 	})
+	if err != nil {
+		s.log.ErrorContext(ctx, "publish delete event", "avatar_id", avatar.ID, "err", err)
+	}
 }
 
 // detectMimeType определяет тип файла по первым байтам (magic bytes)
