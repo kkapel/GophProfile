@@ -8,10 +8,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/kkapel/GophProfile/internal/domain"
+	"github.com/kkapel/GophProfile/internal/metrics"
 	"github.com/kkapel/GophProfile/internal/repository"
 	"github.com/kkapel/GophProfile/internal/storage"
 )
@@ -77,6 +79,7 @@ type AvatarService struct {
 	storage   FileStorage
 	publisher EventPublisher
 	log       *slog.Logger
+	metrics   *metrics.Metrics
 }
 
 // NewAvatarService создаёт сервис аватарок.
@@ -85,13 +88,27 @@ func NewAvatarService(
 	store FileStorage,
 	publisher EventPublisher,
 	log *slog.Logger,
+	metrics *metrics.Metrics,
 ) *AvatarService {
-	return &AvatarService{repo: repo, storage: store, publisher: publisher, log: log}
+	return &AvatarService{repo: repo, storage: store, publisher: publisher, log: log, metrics: metrics}
 }
 
 // Upload сохраняет оригинал в хранилище, создаёт запись в БД
 // и публикует событие на асинхронную обработку.
-func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (domain.Avatar, error) {
+func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (avatar domain.Avatar, err error) {
+	start := time.Now()
+
+	// Итог операции известен только на выходе, поэтому пишем метрики в defer.
+	defer func() {
+		status := "success"
+		if err != nil {
+			status = "error"
+		}
+
+		s.metrics.AvatarUploadsTotal.WithLabelValues(status).Inc()
+		s.metrics.AvatarUploadDuration.WithLabelValues(status).Observe(time.Since(start).Seconds())
+	}()
+
 	if in.Size > MaxFileSize {
 		return domain.Avatar{}, ErrFileTooLarge
 	}
@@ -116,7 +133,7 @@ func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (domain.Avat
 		return domain.Avatar{}, fmt.Errorf("upload to storage: %w", err)
 	}
 
-	avatar, err := s.repo.Create(ctx, domain.Avatar{
+	avatar, err = s.repo.Create(ctx, domain.Avatar{
 		ID:               avatarID,
 		UserID:           in.UserID,
 		FileName:         in.FileName,
@@ -147,6 +164,8 @@ func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (domain.Avat
 			"avatar_id", avatarID, "err", err)
 		return avatar, nil
 	}
+
+	s.metrics.AvatarUploadSize.Observe(float64(in.Size))
 
 	s.log.InfoContext(ctx, "avatar accepted",
 		"avatar_id", avatarID, "user_id", in.UserID, "s3_key", key)
@@ -208,7 +227,16 @@ func (s *AvatarService) List(ctx context.Context, userID string) ([]domain.Avata
 }
 
 // Delete помечает аватарку удалённой и публикует событие на удаление файлов.
-func (s *AvatarService) Delete(ctx context.Context, id uuid.UUID, requesterID string) error {
+func (s *AvatarService) Delete(ctx context.Context, id uuid.UUID, requesterID string) (err error) {
+	defer func() {
+		status := "success"
+		if err != nil {
+			status = "error"
+		}
+
+		s.metrics.AvatarDeletesTotal.WithLabelValues(status).Inc()
+	}()
+
 	avatar, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return mapRepoError(err)

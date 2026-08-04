@@ -140,7 +140,25 @@ services:
       - grafanadata:/var/lib/grafana
     depends_on:
       loki:
-        condition: service_started   
+        condition: service_started
+  prometheus:
+    image: prom/prometheus:v3.13.2
+    container_name: gophprofile-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheusdata:/prometheus
+
+  node-exporter:
+    image: prom/node-exporter:v1.12.1
+    container_name: gophprofile-node-exporter
+    ports:
+      - "9100:9100"      
 
 volumes:
   pgdata:
@@ -148,3 +166,4 @@ volumes:
   rabbitdata:
   lokidata:
   grafanadata:
+  prometheusdata:

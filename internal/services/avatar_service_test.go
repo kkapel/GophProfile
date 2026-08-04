@@ -16,6 +16,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/kkapel/GophProfile/internal/domain"
+	"github.com/kkapel/GophProfile/internal/metrics"
 	"github.com/kkapel/GophProfile/internal/mocks"
 	"github.com/kkapel/GophProfile/internal/repository"
 	"github.com/kkapel/GophProfile/internal/services"
@@ -67,7 +68,7 @@ func TestUpload_Success(t *testing.T) {
 		Publish(gomock.Any(), domain.EventAvatarUploaded, gomock.Any()).
 		Return(nil)
 
-	service := services.NewAvatarService(repo, store, publisher, slog.New(slog.DiscardHandler))
+	service := services.NewAvatarService(repo, store, publisher, slog.New(slog.DiscardHandler), metrics.New())
 
 	avatar, err := service.Upload(context.Background(), services.UploadInput{
 		UserID:   "user1",
@@ -92,6 +93,7 @@ func TestUpload_FileTooLarge(t *testing.T) {
 		mocks.NewMockFileStorage(ctrl),
 		mocks.NewMockEventPublisher(ctrl),
 		slog.New(slog.DiscardHandler),
+		metrics.New(),
 	)
 
 	_, err := service.Upload(context.Background(), services.UploadInput{
@@ -111,6 +113,7 @@ func TestUpload_UnsupportedFormat(t *testing.T) {
 		mocks.NewMockFileStorage(ctrl),
 		mocks.NewMockEventPublisher(ctrl),
 		slog.New(slog.DiscardHandler),
+		metrics.New(),
 	)
 
 	data := []byte("это обычный текст, а не изображение")
@@ -153,7 +156,7 @@ func TestUpload_RepoErrorRemovesFile(t *testing.T) {
 			return nil
 		})
 
-	service := services.NewAvatarService(repo, store, publisher, slog.New(slog.DiscardHandler))
+	service := services.NewAvatarService(repo, store, publisher, slog.New(slog.DiscardHandler), metrics.New())
 
 	_, err := service.Upload(context.Background(), services.UploadInput{
 		UserID: "user1",
@@ -173,7 +176,7 @@ func TestDelete_Forbidden(t *testing.T) {
 		GetByID(gomock.Any(), id).
 		Return(domain.Avatar{ID: id, UserID: "owner"}, nil)
 
-	service := services.NewAvatarService(repo, mocks.NewMockFileStorage(ctrl), mocks.NewMockEventPublisher(ctrl), slog.New(slog.DiscardHandler))
+	service := services.NewAvatarService(repo, mocks.NewMockFileStorage(ctrl), mocks.NewMockEventPublisher(ctrl), slog.New(slog.DiscardHandler), metrics.New())
 
 	err := service.Delete(context.Background(), id, "stranger")
 
@@ -204,7 +207,7 @@ func TestDelete_Success(t *testing.T) {
 			return nil
 		})
 
-	service := services.NewAvatarService(repo, mocks.NewMockFileStorage(ctrl), publisher, slog.New(slog.DiscardHandler))
+	service := services.NewAvatarService(repo, mocks.NewMockFileStorage(ctrl), publisher, slog.New(slog.DiscardHandler), metrics.New())
 
 	require.NoError(t, service.Delete(context.Background(), id, "user1"))
 
@@ -221,7 +224,7 @@ func TestDelete_NotFound(t *testing.T) {
 		GetByID(gomock.Any(), gomock.Any()).
 		Return(domain.Avatar{}, repository.ErrNotFound)
 
-	service := services.NewAvatarService(repo, mocks.NewMockFileStorage(ctrl), mocks.NewMockEventPublisher(ctrl), slog.New(slog.DiscardHandler))
+	service := services.NewAvatarService(repo, mocks.NewMockFileStorage(ctrl), mocks.NewMockEventPublisher(ctrl), slog.New(slog.DiscardHandler), metrics.New())
 
 	err := service.Delete(context.Background(), uuid.New(), "user1")
 
@@ -244,7 +247,7 @@ func TestGetFile_UsesThumbnailKey(t *testing.T) {
 		Download(gomock.Any(), "thumbnails/x/100x100.jpg").
 		Return(&storage.Object{Body: nopCloser{}}, nil)
 
-	service := services.NewAvatarService(repo, store, mocks.NewMockEventPublisher(ctrl), slog.New(slog.DiscardHandler))
+	service := services.NewAvatarService(repo, store, mocks.NewMockEventPublisher(ctrl), slog.New(slog.DiscardHandler), metrics.New())
 
 	obj, err := service.GetFile(context.Background(), id, domain.ThumbSize100)
 	require.NoError(t, err)
@@ -267,7 +270,7 @@ func TestGetFile_FallbackToOriginal(t *testing.T) {
 		Download(gomock.Any(), "avatars/x/original.jpg").
 		Return(&storage.Object{Body: nopCloser{}}, nil)
 
-	service := services.NewAvatarService(repo, store, mocks.NewMockEventPublisher(ctrl), slog.New(slog.DiscardHandler))
+	service := services.NewAvatarService(repo, store, mocks.NewMockEventPublisher(ctrl), slog.New(slog.DiscardHandler), metrics.New())
 
 	obj, err := service.GetFile(context.Background(), id, domain.ThumbSize300)
 	require.NoError(t, err)
@@ -282,7 +285,7 @@ func TestList_ReturnsAvatars(t *testing.T) {
 		ListByUserID(gomock.Any(), "user1").
 		Return([]domain.Avatar{{UserID: "user1"}, {UserID: "user1"}}, nil)
 
-	service := services.NewAvatarService(repo, mocks.NewMockFileStorage(ctrl), mocks.NewMockEventPublisher(ctrl), slog.New(slog.DiscardHandler))
+	service := services.NewAvatarService(repo, mocks.NewMockFileStorage(ctrl), mocks.NewMockEventPublisher(ctrl), slog.New(slog.DiscardHandler), metrics.New())
 
 	avatars, err := service.List(context.Background(), "user1")
 
@@ -298,7 +301,7 @@ func TestGetMetadata_NotFound(t *testing.T) {
 		GetByID(gomock.Any(), gomock.Any()).
 		Return(domain.Avatar{}, repository.ErrNotFound)
 
-	service := services.NewAvatarService(repo, mocks.NewMockFileStorage(ctrl), mocks.NewMockEventPublisher(ctrl), slog.New(slog.DiscardHandler))
+	service := services.NewAvatarService(repo, mocks.NewMockFileStorage(ctrl), mocks.NewMockEventPublisher(ctrl), slog.New(slog.DiscardHandler), metrics.New())
 
 	_, err := service.GetMetadata(context.Background(), uuid.New())
 

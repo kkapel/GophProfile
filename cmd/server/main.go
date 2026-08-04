@@ -20,6 +20,7 @@ import (
 	"github.com/kkapel/GophProfile/internal/database"
 	"github.com/kkapel/GophProfile/internal/handlers"
 	"github.com/kkapel/GophProfile/internal/logger"
+	"github.com/kkapel/GophProfile/internal/metrics"
 	"github.com/kkapel/GophProfile/internal/repository"
 	"github.com/kkapel/GophProfile/internal/services"
 	"github.com/kkapel/GophProfile/internal/storage"
@@ -67,6 +68,27 @@ func run() error {
 	defer db.Close()
 	log.InfoContext(ctx, "database connected, migrations applied")
 
+	// Статистика пула
+	appMetrics := metrics.New()
+	poolGauges := []struct {
+		name  string
+		help  string
+		value func() float64
+	}{
+		{"gophprofile_db_connections_total", "Total number of connections in the pool",
+			func() float64 { return float64(db.Pool.Stat().TotalConns()) }},
+		{"gophprofile_db_connections_acquired", "Number of currently acquired connections",
+			func() float64 { return float64(db.Pool.Stat().AcquiredConns()) }},
+		{"gophprofile_db_connections_idle", "Number of idle connections",
+			func() float64 { return float64(db.Pool.Stat().IdleConns()) }},
+	}
+
+	for _, g := range poolGauges {
+		if err := appMetrics.RegisterGaugeFunc(g.name, g.help, nil, g.value); err != nil {
+			return err
+		}
+	}
+
 	// Подключение к объектному хранилищу
 	store, err := storage.New(ctx, storage.Config{
 		Endpoint:  cfg.MinioEndpoint,
@@ -92,7 +114,7 @@ func run() error {
 
 	// Сборка слоёв приложения
 	avatarRepo := repository.NewAvatarRepository(db.Pool)
-	avatarService := services.NewAvatarService(avatarRepo, store, rabbit, log.With("layer", "service"))
+	avatarService := services.NewAvatarService(avatarRepo, store, rabbit, log.With("layer", "service"), appMetrics)
 	avatarHandler := handlers.NewAvatarHandler(avatarService, log)
 
 	webHandler, err := handlers.NewWebHandler(avatarService, log)
@@ -107,9 +129,11 @@ func run() error {
 	})
 
 	r := chi.NewRouter()
+
 	// Добавить хэндлеры
 	r.Use(middleware.RequestID)
 	r.Use(handlers.LoggingMiddleware(log.With("layer", "http")))
+	r.Use(handlers.MetricsMiddleware(appMetrics))
 	r.Use(middleware.Recoverer)
 
 	// Веб-интерфейс
@@ -122,6 +146,8 @@ func run() error {
 
 	// Делаем пинг для дб и объектного хранилища
 	r.Method(http.MethodGet, "/health", healthHandler)
+
+	r.Handle("/metrics", appMetrics.Handler())
 
 	// Регистрация путей REST API из OpenAPI-спецификации
 	api.HandlerFromMuxWithBaseURL(avatarHandler, r, "/api/v1")
@@ -142,6 +168,11 @@ func run() error {
 			srvErr <- err
 		}
 	}()
+
+	collector := metrics.NewCollector(appMetrics, rabbit, avatarRepo,
+		[]string{broker.QueueProcess, broker.QueueDelete}, log.With("layer", "metrics"))
+
+	go collector.Run(ctx, 15*time.Second)
 
 	// Ожидаем SIGINT/SIGTERM.
 	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

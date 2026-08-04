@@ -16,6 +16,7 @@ import (
 	"github.com/kkapel/GophProfile/internal/broker"
 	"github.com/kkapel/GophProfile/internal/domain"
 	"github.com/kkapel/GophProfile/internal/imageutil"
+	"github.com/kkapel/GophProfile/internal/metrics"
 	"github.com/kkapel/GophProfile/internal/repository"
 	"github.com/kkapel/GophProfile/internal/storage"
 )
@@ -56,11 +57,12 @@ type Worker struct {
 	storage FileStorage
 	broker  *broker.RabbitMQ
 	log     *slog.Logger
+	metrics *metrics.Metrics
 }
 
 // New создаёт worker.
-func New(repo AvatarRepository, store FileStorage, b *broker.RabbitMQ, log *slog.Logger) *Worker {
-	return &Worker{repo: repo, storage: store, broker: b, log: log}
+func New(repo AvatarRepository, store FileStorage, b *broker.RabbitMQ, log *slog.Logger, metrics *metrics.Metrics) *Worker {
+	return &Worker{repo: repo, storage: store, broker: b, log: log, metrics: metrics}
 }
 
 // Run подписывается на очереди и обрабатывает сообщения
@@ -87,20 +89,20 @@ func (w *Worker) Run(ctx context.Context) error {
 			if !ok {
 				return errors.New("upload queue channel closed")
 			}
-			w.process(ctx, delivery, w.handleUpload)
+			w.process(ctx, delivery, domain.EventAvatarUploaded, w.handleUpload)
 
 		case delivery, ok := <-deletes:
 			if !ok {
 				return errors.New("delete queue channel closed")
 			}
-			w.process(ctx, delivery, w.handleDelete)
+			w.process(ctx, delivery, domain.EventAvatarDeleted, w.handleDelete)
 		}
 	}
 }
 
 // process выполняет обработчик с повторными попытками и подтверждает
 // сообщение брокеру.
-func (w *Worker) process(ctx context.Context, delivery amqp.Delivery, handler func(context.Context, []byte) error) {
+func (w *Worker) process(ctx context.Context, delivery amqp.Delivery, eventType string, handler func(context.Context, []byte) error) {
 	var err error
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -109,6 +111,7 @@ func (w *Worker) process(ctx context.Context, delivery amqp.Delivery, handler fu
 			if ackErr := delivery.Ack(false); ackErr != nil {
 				w.log.ErrorContext(ctx, "ack message", "err", ackErr)
 			}
+			w.metrics.ProcessedEventsTotal.WithLabelValues(eventType, "success").Inc()
 			return
 		}
 
@@ -119,6 +122,7 @@ func (w *Worker) process(ctx context.Context, delivery amqp.Delivery, handler fu
 			delay := baseDelay * time.Duration(1<<(attempt-1))
 			select {
 			case <-ctx.Done():
+				w.metrics.ProcessedEventsTotal.WithLabelValues(eventType, "cancelled").Inc()
 				return
 			case <-time.After(delay):
 			}
@@ -126,6 +130,7 @@ func (w *Worker) process(ctx context.Context, delivery amqp.Delivery, handler fu
 	}
 
 	w.log.ErrorContext(ctx, "message dropped after retries", "err", err)
+	w.metrics.ProcessedEventsTotal.WithLabelValues(eventType, "error").Inc()
 
 	// requeue=false: сообщение не возвращается в очередь, иначе
 	// оно будет обрабатываться бесконечно.
@@ -205,6 +210,12 @@ func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 func (w *Worker) makeThumbnails(ctx context.Context, avatarID, s3Key string) (
 	thumbnails map[string]string, width, height int32, err error,
 ) {
+	start := time.Now()
+
+	defer func() {
+		w.metrics.ThumbnailDuration.Observe(time.Since(start).Seconds())
+	}()
+
 	obj, err := w.storage.Download(ctx, s3Key)
 	if err != nil {
 		return nil, 0, 0, err

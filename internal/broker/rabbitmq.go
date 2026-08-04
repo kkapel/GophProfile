@@ -177,3 +177,14 @@ func (r *RabbitMQ) Close() error {
 
 	return errors.Join(errs...)
 }
+
+// QueueDepth возвращает число сообщений, ожидающих обработки в очереди.
+func (r *RabbitMQ) QueueDepth(queue string) (int, error) {
+	// Пассивное объявление не создаёт очередь, а лишь запрашивает её состояние.
+	q, err := r.channel.QueueDeclarePassive(queue, true, false, false, false, nil)
+	if err != nil {
+		return 0, fmt.Errorf("inspect queue %q: %w", queue, err)
+	}
+
+	return q.Messages, nil
+}

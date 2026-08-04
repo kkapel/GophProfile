@@ -4,8 +4,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,6 +17,7 @@ import (
 	"github.com/kkapel/GophProfile/internal/config"
 	"github.com/kkapel/GophProfile/internal/database"
 	"github.com/kkapel/GophProfile/internal/logger"
+	"github.com/kkapel/GophProfile/internal/metrics"
 	"github.com/kkapel/GophProfile/internal/repository"
 	"github.com/kkapel/GophProfile/internal/storage"
 	"github.com/kkapel/GophProfile/internal/worker"
@@ -78,8 +81,32 @@ func run() error {
 		_ = rabbit.Close()
 	}()
 
+	appMetrics := metrics.New()
+	// Отдельный HTTP-сервер только для метрик
+	metricsSrv := &http.Server{
+		Addr:              cfg.MetricsAddress,
+		Handler:           appMetrics.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		log.InfoContext(ctx, "metrics server started", "addr", cfg.MetricsAddress)
+		if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.ErrorContext(ctx, "metrics server error", "err", err)
+		}
+	}()
+
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
+			log.ErrorContext(context.Background(), "shutdown metrics server", "err", err)
+		}
+	}()
+
 	avatarRepo := repository.NewAvatarRepository(db.Pool)
-	w := worker.New(avatarRepo, store, rabbit, log)
+	w := worker.New(avatarRepo, store, rabbit, log, appMetrics)
 
 	log.InfoContext(ctx, "worker started")
 

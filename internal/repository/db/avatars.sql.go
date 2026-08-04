@@ -201,6 +201,18 @@ func (q *Queries) SoftDeleteAvatar(ctx context.Context, id uuid.UUID) (Avatar, e
 	return i, err
 }
 
+const totalStorageBytes = `-- name: TotalStorageBytes :one
+SELECT COALESCE(SUM(size_bytes), 0)::BIGINT FROM avatars
+WHERE deleted_at IS NULL
+`
+
+func (q *Queries) TotalStorageBytes(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, totalStorageBytes)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const updateProcessingResult = `-- name: UpdateProcessingResult :one
 UPDATE avatars
 SET processing_status = $2,

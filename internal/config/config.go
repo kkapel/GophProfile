@@ -13,6 +13,7 @@ type Config struct {
 	HTTPAddress    string
 	LoggerLevel    string
 	MigrationsPath string
+	MetricsAddress string
 
 	DatabaseURL string
 
@@ -37,6 +38,7 @@ func LoadConfig() (*Config, error) {
 	v.SetDefault("minio_bucket", "avatars")
 	v.SetDefault("minio_use_ssl", false)
 	v.SetDefault("migrations_path", "migrations")
+	v.SetDefault("metrics_address", ":8081")
 
 	// Переменные окружения: GOPHPROFILE_DATABASE_URL и т.д.
 	v.AllowEmptyEnv(true)
@@ -48,6 +50,7 @@ func LoadConfig() (*Config, error) {
 		HTTPAddress:    v.GetString("http_address"),
 		LoggerLevel:    v.GetString("logger_level"),
 		MigrationsPath: v.GetString("migrations_path"),
+		MetricsAddress: v.GetString("metrics_address"),
 
 		DatabaseURL: v.GetString("database_url"),
 
