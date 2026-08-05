@@ -158,7 +158,14 @@ services:
     image: prom/node-exporter:v1.12.1
     container_name: gophprofile-node-exporter
     ports:
-      - "9100:9100"      
+      - "9100:9100"
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    container_name: gophprofile-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"   # веб-интерфейс          
 
 volumes:
   pgdata:

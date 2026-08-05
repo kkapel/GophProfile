@@ -24,6 +24,8 @@ import (
 	"github.com/kkapel/GophProfile/internal/repository"
 	"github.com/kkapel/GophProfile/internal/services"
 	"github.com/kkapel/GophProfile/internal/storage"
+	"github.com/kkapel/GophProfile/internal/tracing"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 func main() {
@@ -89,6 +91,20 @@ func run() error {
 		}
 	}
 
+	// Трейсинг
+	shutdownTracing, err := tracing.Init(ctx, "gophprofile-server", "1.0.0")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := shutdownTracing(shutdownCtx); err != nil {
+			log.ErrorContext(context.Background(), "shutdown tracing", "err", err)
+		}
+	}()
+
 	// Подключение к объектному хранилищу
 	store, err := storage.New(ctx, storage.Config{
 		Endpoint:  cfg.MinioEndpoint,
@@ -132,6 +148,7 @@ func run() error {
 
 	// Добавить хэндлеры
 	r.Use(middleware.RequestID)
+	r.Use(otelhttp.NewMiddleware("gophprofile-server"))
 	r.Use(handlers.LoggingMiddleware(log.With("layer", "http")))
 	r.Use(handlers.MetricsMiddleware(appMetrics))
 	r.Use(middleware.Recoverer)

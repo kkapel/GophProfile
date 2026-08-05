@@ -20,6 +20,7 @@ import (
 	"github.com/kkapel/GophProfile/internal/metrics"
 	"github.com/kkapel/GophProfile/internal/repository"
 	"github.com/kkapel/GophProfile/internal/storage"
+	"github.com/kkapel/GophProfile/internal/tracing"
 	"github.com/kkapel/GophProfile/internal/worker"
 )
 
@@ -102,6 +103,20 @@ func run() error {
 
 		if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
 			log.ErrorContext(context.Background(), "shutdown metrics server", "err", err)
+		}
+	}()
+
+	// Трейсинг
+	shutdownTracing, err := tracing.Init(ctx, "gophprofile-worker", "1.0.0")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := shutdownTracing(shutdownCtx); err != nil {
+			log.ErrorContext(context.Background(), "shutdown tracing", "err", err)
 		}
 	}()
 
