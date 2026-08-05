@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/exaring/otelpgx"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres" // драйвер миграций
 	_ "github.com/golang-migrate/migrate/v4/source/file"       // источник миграций
@@ -46,6 +47,10 @@ func Connect(ctx context.Context, dsn string) (*DB, error) {
 	cfg.MinConns = 2
 	cfg.MaxConnLifetime = 5 * time.Minute
 	cfg.MaxConnIdleTime = time.Minute
+
+	// Трассировка запросов: каждый SQL-запрос станет отдельным спаном
+	// с текстом запроса в атрибутах.
+	cfg.ConnConfig.Tracer = otelpgx.NewTracer()
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
