@@ -11,6 +11,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/kkapel/GophProfile/internal/domain"
 	"github.com/kkapel/GophProfile/internal/metrics"
@@ -80,6 +84,7 @@ type AvatarService struct {
 	publisher EventPublisher
 	log       *slog.Logger
 	metrics   *metrics.Metrics
+	tracer    trace.Tracer
 }
 
 // NewAvatarService создаёт сервис аватарок.
@@ -90,12 +95,21 @@ func NewAvatarService(
 	log *slog.Logger,
 	metrics *metrics.Metrics,
 ) *AvatarService {
-	return &AvatarService{repo: repo, storage: store, publisher: publisher, log: log, metrics: metrics}
+	return &AvatarService{repo: repo, storage: store, publisher: publisher, log: log, metrics: metrics, tracer: otel.Tracer("gophprofile/services")}
 }
 
 // Upload сохраняет оригинал в хранилище, создаёт запись в БД
 // и публикует событие на асинхронную обработку.
 func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (avatar domain.Avatar, err error) {
+	ctx, span := s.tracer.Start(ctx, "avatar.upload")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("user_id", in.UserID),
+		attribute.String("file_name", in.FileName),
+		attribute.Int64("file_size", in.Size),
+	)
+
 	start := time.Now()
 
 	// Итог операции известен только на выходе, поэтому пишем метрики в defer.
@@ -103,6 +117,8 @@ func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (avatar doma
 		status := "success"
 		if err != nil {
 			status = "error"
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 		}
 
 		s.metrics.AvatarUploadsTotal.WithLabelValues(status).Inc()
@@ -145,7 +161,7 @@ func (s *AvatarService) Upload(ctx context.Context, in UploadInput) (avatar doma
 	})
 	if err != nil {
 		// Файл уже в хранилище — убираем его, чтобы не оставлять мусор.
-		if delErr := s.storage.Delete(ctx, key); err != nil {
+		if delErr := s.storage.Delete(ctx, key); delErr != nil {
 			s.log.ErrorContext(ctx, "cleanup uploaded file", "s3_key", key, "err", delErr)
 		}
 		return domain.Avatar{}, err
@@ -228,10 +244,20 @@ func (s *AvatarService) List(ctx context.Context, userID string) ([]domain.Avata
 
 // Delete помечает аватарку удалённой и публикует событие на удаление файлов.
 func (s *AvatarService) Delete(ctx context.Context, id uuid.UUID, requesterID string) (err error) {
+	ctx, span := s.tracer.Start(ctx, "avatar.delete")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("avatar_id", id.String()),
+		attribute.String("requester_id", requesterID),
+	)
+
 	defer func() {
 		status := "success"
 		if err != nil {
 			status = "error"
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 		}
 
 		s.metrics.AvatarDeletesTotal.WithLabelValues(status).Inc()
