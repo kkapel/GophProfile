@@ -9,6 +9,13 @@ datasources:
     isDefault: true
     editable: true
 
+  - name: Jaeger
+    type: jaeger
+    uid: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    editable: true
+
   - name: Loki
     type: loki
     uid: loki
@@ -17,3 +24,12 @@ datasources:
     editable: true
     jsonData:
       maxLines: 1000
+      # Превращает trace_id в ссылку на трейс в Jaeger:
+      # из строки лога можно провалиться прямо в трассировку запроса.
+      derivedFields:
+        - name: TraceID
+          matcherType: label
+          matcherRegex: trace_id
+          url: "${__value.raw}"
+          urlDisplayLabel: Открыть трейс
+          datasourceUid: jaeger

@@ -137,6 +137,7 @@ services:
       - "3000:3000"
     volumes:
       - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/etc/grafana/dashboards:ro
       - grafanadata:/var/lib/grafana
     depends_on:
       loki:
