@@ -12,6 +12,10 @@ import (
 
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/kkapel/GophProfile/internal/broker"
 	"github.com/kkapel/GophProfile/internal/domain"
@@ -58,11 +62,12 @@ type Worker struct {
 	broker  *broker.RabbitMQ
 	log     *slog.Logger
 	metrics *metrics.Metrics
+	tracer  trace.Tracer
 }
 
 // New создаёт worker.
 func New(repo AvatarRepository, store FileStorage, b *broker.RabbitMQ, log *slog.Logger, metrics *metrics.Metrics) *Worker {
-	return &Worker{repo: repo, storage: store, broker: b, log: log, metrics: metrics}
+	return &Worker{repo: repo, storage: store, broker: b, log: log, metrics: metrics, tracer: otel.Tracer("gophprofile/worker")}
 }
 
 // Run подписывается на очереди и обрабатывает сообщения
@@ -103,6 +108,19 @@ func (w *Worker) Run(ctx context.Context) error {
 // process выполняет обработчик с повторными попытками и подтверждает
 // сообщение брокеру.
 func (w *Worker) process(ctx context.Context, delivery amqp.Delivery, eventType string, handler func(context.Context, []byte) error) {
+	// Восстанавливаем контекст отправителя: спаны воркера станут
+	// продолжением трейса, начатого в HTTP-запросе.
+	ctx = broker.ExtractContext(ctx, delivery.Headers)
+
+	ctx, span := w.tracer.Start(ctx, "consume "+eventType,
+		trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithAttributes(
+			attribute.String("messaging.system", "rabbitmq"),
+			attribute.String("messaging.operation", "process"),
+		),
+	)
+	defer span.End()
+
 	var err error
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -131,6 +149,9 @@ func (w *Worker) process(ctx context.Context, delivery amqp.Delivery, eventType 
 
 	w.log.ErrorContext(ctx, "message dropped after retries", "err", err)
 	w.metrics.ProcessedEventsTotal.WithLabelValues(eventType, "error").Inc()
+
+	span.RecordError(err)
+	span.SetStatus(codes.Error, "message dropped after retries")
 
 	// requeue=false: сообщение не возвращается в очередь, иначе
 	// оно будет обрабатываться бесконечно.
@@ -210,6 +231,12 @@ func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 func (w *Worker) makeThumbnails(ctx context.Context, avatarID, s3Key string) (
 	thumbnails map[string]string, width, height int32, err error,
 ) {
+
+	ctx, span := w.tracer.Start(ctx, "avatar.thumbnails",
+		trace.WithAttributes(attribute.String("avatar_id", avatarID)),
+	)
+	defer span.End()
+
 	start := time.Now()
 
 	defer func() {
