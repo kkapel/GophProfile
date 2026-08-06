@@ -92,7 +92,7 @@ func run() error {
 	}
 
 	// Трейсинг
-	shutdownTracing, err := tracing.Init(ctx, "gophprofile-server", "1.0.0")
+	shutdownTracing, err := tracing.Init(ctx, "gophprofile-server", "1.0.0", cfg.TraceSampleRatio)
 	if err != nil {
 		return err
 	}

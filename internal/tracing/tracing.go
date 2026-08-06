@@ -18,8 +18,9 @@ type ShutdownFunc func(ctx context.Context) error
 
 // Init настраивает провайдер трассировки и глобальный пропагатор контекста.
 // Адрес коллектора берётся из переменных окружения OTEL_*.
+// sampleRatio задаёт долю записываемых трейсов: 1.0 — все, 0.1 — каждый десятый.
 // Возвращённую функцию завершения нужно вызвать перед выходом из программы.
-func Init(ctx context.Context, serviceName, serviceVersion string) (ShutdownFunc, error) {
+func Init(ctx context.Context, serviceName, serviceVersion string, sampleRatio float64) (ShutdownFunc, error) {
 	// gRPC Exporter читает адрес коллектора из OTEL_EXPORTER_OTLP_ENDPOINT.
 	exporter, err := otlptracegrpc.New(ctx)
 	if err != nil {
@@ -42,8 +43,10 @@ func Init(ctx context.Context, serviceName, serviceVersion string) (ShutdownFunc
 		sdktrace.WithResource(res),
 		// BatchSpanProcessor копит спаны и передаёт их gRPC Exporter'у пакетами.
 		sdktrace.WithBatcher(exporter),
-		// AlwaysSample записывает 100% запросов
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithSampler(
+			// Доля записываемых трейсов задаётся конфигурацией
+			sdktrace.ParentBased(sdktrace.TraceIDRatioBased(sampleRatio)),
+		),
 	)
 
 	otel.SetTracerProvider(provider)

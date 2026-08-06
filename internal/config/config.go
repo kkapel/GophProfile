@@ -15,6 +15,8 @@ type Config struct {
 	MigrationsPath string
 	MetricsAddress string
 
+	TraceSampleRatio float64
+
 	DatabaseURL string
 
 	MinioEndpoint  string
@@ -39,6 +41,7 @@ func LoadConfig() (*Config, error) {
 	v.SetDefault("minio_use_ssl", false)
 	v.SetDefault("migrations_path", "migrations")
 	v.SetDefault("metrics_address", ":8081")
+	v.SetDefault("trace_sample_ratio", 1.0)
 
 	// Переменные окружения: GOPHPROFILE_DATABASE_URL и т.д.
 	v.AllowEmptyEnv(true)
@@ -51,6 +54,8 @@ func LoadConfig() (*Config, error) {
 		LoggerLevel:    v.GetString("logger_level"),
 		MigrationsPath: v.GetString("migrations_path"),
 		MetricsAddress: v.GetString("metrics_address"),
+
+		TraceSampleRatio: v.GetFloat64("trace_sample_ratio"),
 
 		DatabaseURL: v.GetString("database_url"),
 
@@ -83,5 +88,9 @@ func (c *Config) validate() error {
 	if c.RabbitMQURL == "" {
 		return fmt.Errorf("RABBITMQ_URL is required")
 	}
+	if c.TraceSampleRatio < 0 || c.TraceSampleRatio > 1 {
+		return fmt.Errorf("TRACE_SAMPLE_RATIO must be between 0 and 1, got %v", c.TraceSampleRatio)
+	}
+
 	return nil
 }
