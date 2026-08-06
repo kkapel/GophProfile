@@ -21,14 +21,21 @@ func LoggingMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 
 			next.ServeHTTP(wrapped, r)
 
-			log.LogAttrs(r.Context(), levelByStatus(wrapped.Status()), "http request",
+			attrs := []slog.Attr{
 				slog.String("method", r.Method),
 				slog.String("path", r.URL.Path),
 				slog.Int("status", wrapped.Status()),
 				slog.Int("bytes", wrapped.BytesWritten()),
 				slog.Int64("duration_ms", time.Since(start).Milliseconds()),
-				slog.String("request_id", middleware.GetReqID(r.Context())),
-			)
+			}
+
+			// Проверяем, есть ли в контексте идентификатор запроса, и если есть,
+			// добавляем его в атрибуты.
+			if requestID := middleware.GetReqID(r.Context()); requestID != "" {
+				attrs = append(attrs, slog.String("request_id", requestID))
+			}
+
+			log.LogAttrs(r.Context(), levelByStatus(wrapped.Status()), "http request", attrs...)
 		})
 	}
 }
