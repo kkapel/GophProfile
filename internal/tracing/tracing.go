@@ -10,7 +10,6 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.34.0"
 )
 
 // ShutdownFunc завершает работу gRPC Exporter'а, дожидаясь отправки буфера.
@@ -20,21 +19,13 @@ type ShutdownFunc func(ctx context.Context) error
 // Адрес коллектора берётся из переменных окружения OTEL_*.
 // sampleRatio задаёт долю записываемых трейсов: 1.0 — все, 0.1 — каждый десятый.
 // Возвращённую функцию завершения нужно вызвать перед выходом из программы.
-func Init(ctx context.Context, serviceName, serviceVersion string, sampleRatio float64) (ShutdownFunc, error) {
+func Init(ctx context.Context, res *resource.Resource, serviceName, serviceVersion string, sampleRatio float64) (ShutdownFunc, error) {
 	// gRPC Exporter читает адрес коллектора из OTEL_EXPORTER_OTLP_ENDPOINT.
 	exporter, err := otlptracegrpc.New(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("create otlp trace exporter: %w", err)
 	}
 
-	res, err := resource.New(ctx,
-		resource.WithFromEnv(),
-		resource.WithTelemetrySDK(),
-		resource.WithAttributes(
-			semconv.ServiceNameKey.String(serviceName),
-			semconv.ServiceVersionKey.String(serviceVersion),
-		),
-	)
 	if err != nil {
 		return nil, fmt.Errorf("create resource: %w", err)
 	}

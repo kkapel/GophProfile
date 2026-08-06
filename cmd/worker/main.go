@@ -22,6 +22,8 @@ import (
 	"github.com/kkapel/GophProfile/internal/storage"
 	"github.com/kkapel/GophProfile/internal/tracing"
 	"github.com/kkapel/GophProfile/internal/worker"
+	"go.opentelemetry.io/otel/sdk/resource"
+	semconv "go.opentelemetry.io/otel/semconv/v1.34.0"
 )
 
 func main() {
@@ -37,7 +39,22 @@ func run() error {
 		return err
 	}
 
-	log, shutdownLogger, err := logger.New(context.Background(), "gophprofile-worker", "1.0.0", cfg.LoggerLevel)
+	// Общие метаданные телеметрии: один ресурс
+	// дальше передаётся и в логгер, и в трассировщик.
+	ctx := context.Background()
+	res, err := resource.New(ctx,
+		resource.WithFromEnv(),
+		resource.WithTelemetrySDK(),
+		resource.WithAttributes(
+			semconv.ServiceNameKey.String("gophprofile-worker"),
+			semconv.ServiceVersionKey.String("1.0.0"),
+		),
+	)
+	if err != nil {
+		return fmt.Errorf("create resource: %w", err)
+	}
+
+	log, shutdownLogger, err := logger.New(context.Background(), res, "gophprofile-worker", "1.0.0", cfg.LoggerLevel)
 	if err != nil {
 		return err
 	}
@@ -107,7 +124,7 @@ func run() error {
 	}()
 
 	// Трейсинг
-	shutdownTracing, err := tracing.Init(ctx, "gophprofile-worker", "1.0.0", cfg.TraceSampleRatio)
+	shutdownTracing, err := tracing.Init(ctx, res, "gophprofile-worker", "1.0.0", cfg.TraceSampleRatio)
 	if err != nil {
 		return err
 	}

@@ -14,7 +14,6 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	"go.opentelemetry.io/otel/sdk/resource"
-	semconv "go.opentelemetry.io/otel/semconv/v1.34.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -26,7 +25,7 @@ type ShutdownFunc func(ctx context.Context) error
 // Адрес коллектора берётся из переменных окружения OTEL_*.
 // Возвращённую функцию завершения нужно вызвать перед выходом из программы.
 // Допустимые уровни: DEBUG, INFO, WARN, ERROR.
-func New(ctx context.Context, serviceName, serviceVersion, level string) (*slog.Logger, ShutdownFunc, error) {
+func New(ctx context.Context, res *resource.Resource, serviceName, serviceVersion, level string) (*slog.Logger, ShutdownFunc, error) {
 	parsed, err := parseLevel(level)
 	if err != nil {
 		return nil, nil, err
@@ -37,17 +36,6 @@ func New(ctx context.Context, serviceName, serviceVersion, level string) (*slog.
 	if err != nil {
 		return nil, nil, fmt.Errorf("create otlp log exporter: %w", err)
 	}
-
-	// Resource описывает, кто отправил запись. Эти атрибуты станут
-	// метками потока в Loki.
-	res, err := resource.New(ctx,
-		resource.WithFromEnv(),
-		resource.WithTelemetrySDK(),
-		resource.WithAttributes(
-			semconv.ServiceNameKey.String(serviceName),
-			semconv.ServiceVersionKey.String(serviceVersion),
-		),
-	)
 
 	if err != nil {
 		return nil, nil, fmt.Errorf("create resource: %w", err)
