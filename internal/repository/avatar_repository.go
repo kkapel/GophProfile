@@ -209,3 +209,13 @@ func (r *AvatarRepository) MarkEventProcessed(ctx context.Context, eventID uuid.
 
 	return nil
 }
+
+// TotalStorageBytes возвращает суммарный размер неудалённых аватарок.
+func (r *AvatarRepository) TotalStorageBytes(ctx context.Context) (int64, error) {
+	total, err := r.queries.TotalStorageBytes(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("total storage bytes: %w", err)
+	}
+
+	return total, nil
+}

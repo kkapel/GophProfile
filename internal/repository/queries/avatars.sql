@@ -61,3 +61,7 @@ WHERE id = $1;
 UPDATE avatars
 SET upload_status = $2, updated_at = NOW()
 WHERE id = $1;
+
+-- name: TotalStorageBytes :one
+SELECT COALESCE(SUM(size_bytes), 0)::BIGINT FROM avatars
+WHERE deleted_at IS NULL;

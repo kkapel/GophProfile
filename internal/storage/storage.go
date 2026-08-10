@@ -9,6 +9,10 @@ import (
 	// minio-go — официальный Go-клиент для MinIO и любого S3-совместимого хранилища.
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Object — файл, полученный из хранилища.
@@ -26,6 +30,7 @@ type Object struct {
 type Storage struct {
 	client *minio.Client
 	bucket string
+	tracer trace.Tracer
 }
 
 // Config — параметры подключения к хранилищу.
@@ -52,7 +57,7 @@ func New(ctx context.Context, cfg Config) (*Storage, error) {
 		return nil, fmt.Errorf("create minio client: %w", err)
 	}
 
-	s := &Storage{client: client, bucket: cfg.Bucket}
+	s := &Storage{client: client, bucket: cfg.Bucket, tracer: otel.Tracer("gophprofile/storage")}
 
 	// Первый реальный поход в сеть.
 	if err := s.ensureBucket(ctx); err != nil {
@@ -88,6 +93,17 @@ func (s *Storage) ensureBucket(ctx context.Context) error {
 // key — это полное имя объекта, например "avatars/<uuid>/original.jpg".
 // Слэши в нём — просто часть имени, настоящих папок в S3 нет.
 func (s *Storage) Upload(ctx context.Context, key string, r io.Reader, size int64, contentType string) error {
+	ctx, span := s.tracer.Start(ctx, "storage.Upload",
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			attribute.String("s3.bucket", s.bucket),
+			attribute.String("s3.key", key),
+			attribute.Int64("s3.size", size),
+			attribute.String("s3.content_type", contentType),
+		),
+	)
+	defer span.End()
+
 	// PutObject читает данные из r и заливает их в бакет.
 	// size — ожидаемый размер в байтах. Если он неизвестен, передают -1,
 	// тогда SDK грузит файл частями (multipart) и потребляет больше памяти.
@@ -99,6 +115,8 @@ func (s *Storage) Upload(ctx context.Context, key string, r io.Reader, size int6
 		ContentType: contentType,
 	})
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "upload failed")
 		return fmt.Errorf("upload object %q: %w", key, err)
 	}
 
@@ -107,10 +125,21 @@ func (s *Storage) Upload(ctx context.Context, key string, r io.Reader, size int6
 
 // Download возвращает объект по ключу.
 func (s *Storage) Download(ctx context.Context, key string) (*Object, error) {
+	ctx, span := s.tracer.Start(ctx, "storage.Download",
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			attribute.String("s3.bucket", s.bucket),
+			attribute.String("s3.key", key),
+		),
+	)
+	defer span.End()
+
 	// ВАЖНО: GetObject ленивый — он НЕ делает сетевой запрос и почти никогда
 	// не возвращает ошибку здесь. Он лишь готовит объект-ридер.
 	obj, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "download failed")
 		return nil, fmt.Errorf("get object %q: %w", key, err)
 	}
 
@@ -119,10 +148,13 @@ func (s *Storage) Download(ctx context.Context, key string) (*Object, error) {
 	// Без Stat мы узнали бы об этом только при первом Read — слишком поздно.
 	info, err := obj.Stat()
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "download failed")
 		// Ридер надо закрыть, раз наружу мы его не отдаём.
 		_ = obj.Close()
 		return nil, fmt.Errorf("stat object %q: %w", key, err)
 	}
+	span.SetAttributes(attribute.Int64("s3.size", info.Size))
 
 	return &Object{
 		Body:        obj, // minio.Object реализует io.ReadCloser (и io.Seeker)
@@ -133,10 +165,22 @@ func (s *Storage) Download(ctx context.Context, key string) (*Object, error) {
 
 // Delete удаляет объект по ключу.
 func (s *Storage) Delete(ctx context.Context, key string) error {
+	ctx, span := s.tracer.Start(ctx, "storage.Delete",
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			attribute.String("s3.bucket", s.bucket),
+			attribute.String("s3.key", key),
+		),
+	)
+	defer span.End()
+
 	// RemoveObject идемпотентен: удаление несуществующего ключа
 	// не считается ошибкой в S3. Это удобно для повторной обработки
 	// одного и того же события из очереди.
 	if err := s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{}); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "delete failed")
+
 		return fmt.Errorf("remove object %q: %w", key, err)
 	}
 
@@ -147,8 +191,17 @@ func (s *Storage) Delete(ctx context.Context, key string) error {
 // Здесь простой цикл: объектов у нас максимум три (оригинал + две миниатюры).
 // Для массовых удалений в SDK есть RemoveObjects с каналом ключей.
 func (s *Storage) DeleteMany(ctx context.Context, keys []string) error {
+	ctx, span := s.tracer.Start(ctx, "storage.DeleteMany",
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(attribute.Int("s3.keys_count", len(keys))),
+	)
+	defer span.End()
+
 	for _, key := range keys {
 		if err := s.Delete(ctx, key); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "delete many failed")
+
 			return err
 		}
 	}

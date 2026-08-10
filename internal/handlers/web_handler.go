@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"html/template"
@@ -46,8 +47,8 @@ type galleryPageData struct {
 }
 
 // UploadPage обрабатывает GET /web/upload — страницу с формой загрузки.
-func (h *WebHandler) UploadPage(w http.ResponseWriter, _ *http.Request) {
-	h.render(w, "index.html", nil)
+func (h *WebHandler) UploadPage(w http.ResponseWriter, r *http.Request) {
+	h.render(r.Context(), w, "index.html", nil)
 }
 
 // Upload обрабатывает POST /web/upload — приём формы веб-интерфейса.
@@ -100,7 +101,7 @@ func (h *WebHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		File:     file,
 	})
 	if err != nil {
-		writeServiceError(w, h.log, err)
+		writeServiceError(r.Context(), w, h.log, err)
 		return
 	}
 
@@ -113,7 +114,7 @@ func (h *WebHandler) GalleryPage(w http.ResponseWriter, r *http.Request) {
 
 	avatars, err := h.service.List(r.Context(), userID)
 	if err != nil {
-		h.log.Error("list avatars for gallery", "err", err)
+		h.log.ErrorContext(r.Context(), "list avatars for gallery", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -127,15 +128,15 @@ func (h *WebHandler) GalleryPage(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	h.render(w, "gallery.html", galleryPageData{UserID: userID, Avatars: items})
+	h.render(r.Context(), w, "gallery.html", galleryPageData{UserID: userID, Avatars: items})
 }
 
 // render выполняет шаблон и пишет результат в ответ.
-func (h *WebHandler) render(w http.ResponseWriter, name string, data any) {
+func (h *WebHandler) render(ctx context.Context, w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	if err := h.templates.ExecuteTemplate(w, name, data); err != nil {
-		h.log.Error("render template", "template", name, "err", err)
+		h.log.ErrorContext(ctx, "render template", "template", name, "err", err)
 		http.Error(w, "template error", http.StatusInternalServerError)
 	}
 }

@@ -12,10 +12,15 @@ import (
 
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/kkapel/GophProfile/internal/broker"
 	"github.com/kkapel/GophProfile/internal/domain"
 	"github.com/kkapel/GophProfile/internal/imageutil"
+	"github.com/kkapel/GophProfile/internal/metrics"
 	"github.com/kkapel/GophProfile/internal/repository"
 	"github.com/kkapel/GophProfile/internal/storage"
 )
@@ -56,11 +61,13 @@ type Worker struct {
 	storage FileStorage
 	broker  *broker.RabbitMQ
 	log     *slog.Logger
+	metrics *metrics.Metrics
+	tracer  trace.Tracer
 }
 
 // New создаёт worker.
-func New(repo AvatarRepository, store FileStorage, b *broker.RabbitMQ, log *slog.Logger) *Worker {
-	return &Worker{repo: repo, storage: store, broker: b, log: log}
+func New(repo AvatarRepository, store FileStorage, b *broker.RabbitMQ, log *slog.Logger, metrics *metrics.Metrics) *Worker {
+	return &Worker{repo: repo, storage: store, broker: b, log: log, metrics: metrics, tracer: otel.Tracer("gophprofile/worker")}
 }
 
 // Run подписывается на очереди и обрабатывает сообщения
@@ -76,7 +83,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		return err
 	}
 
-	w.log.Info("worker consuming", "queues", []string{broker.QueueProcess, broker.QueueDelete})
+	w.log.InfoContext(ctx, "worker consuming", "queues", []string{broker.QueueProcess, broker.QueueDelete})
 
 	for {
 		select {
@@ -87,50 +94,69 @@ func (w *Worker) Run(ctx context.Context) error {
 			if !ok {
 				return errors.New("upload queue channel closed")
 			}
-			w.process(ctx, delivery, w.handleUpload)
+			w.process(ctx, delivery, domain.EventAvatarUploaded, w.handleUpload)
 
 		case delivery, ok := <-deletes:
 			if !ok {
 				return errors.New("delete queue channel closed")
 			}
-			w.process(ctx, delivery, w.handleDelete)
+			w.process(ctx, delivery, domain.EventAvatarDeleted, w.handleDelete)
 		}
 	}
 }
 
 // process выполняет обработчик с повторными попытками и подтверждает
 // сообщение брокеру.
-func (w *Worker) process(ctx context.Context, delivery amqp.Delivery, handler func(context.Context, []byte) error) {
+func (w *Worker) process(ctx context.Context, delivery amqp.Delivery, eventType string, handler func(context.Context, []byte) error) {
+	// Восстанавливаем контекст отправителя: спаны воркера станут
+	// продолжением трейса, начатого в HTTP-запросе.
+	ctx = broker.ExtractContext(ctx, delivery.Headers)
+
+	ctx, span := w.tracer.Start(ctx, "consume "+eventType,
+		trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithAttributes(
+			attribute.String("messaging.system", "rabbitmq"),
+			attribute.String("messaging.operation", "process"),
+		),
+	)
+	defer span.End()
+
 	var err error
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if err = handler(ctx, delivery.Body); err == nil {
 			// Подтверждаем обработку: сообщение удаляется из очереди.
 			if ackErr := delivery.Ack(false); ackErr != nil {
-				w.log.Error("ack message", "err", ackErr)
+				w.log.ErrorContext(ctx, "ack message", "err", ackErr)
 			}
+			w.metrics.ProcessedEventsTotal.WithLabelValues(eventType, "success").Inc()
 			return
 		}
 
-		w.log.Warn("handle message failed", "attempt", attempt, "err", err)
+		w.log.WarnContext(ctx, "handle message failed", "attempt", attempt, "err", err)
 
 		if attempt < maxAttempts {
 			// Экспоненциальная задержка: 1с, 2с, 4с...
 			delay := baseDelay * time.Duration(1<<(attempt-1))
 			select {
 			case <-ctx.Done():
+				w.metrics.ProcessedEventsTotal.WithLabelValues(eventType, "cancelled").Inc()
 				return
 			case <-time.After(delay):
 			}
 		}
 	}
 
-	w.log.Error("message dropped after retries", "err", err)
+	w.log.ErrorContext(ctx, "message dropped after retries", "err", err)
+	w.metrics.ProcessedEventsTotal.WithLabelValues(eventType, "error").Inc()
+
+	span.RecordError(err)
+	span.SetStatus(codes.Error, "message dropped after retries")
 
 	// requeue=false: сообщение не возвращается в очередь, иначе
 	// оно будет обрабатываться бесконечно.
 	if nackErr := delivery.Nack(false, false); nackErr != nil {
-		w.log.Error("nack message", "err", nackErr)
+		w.log.ErrorContext(ctx, "nack message", "err", nackErr)
 	}
 }
 
@@ -138,7 +164,7 @@ func (w *Worker) process(ctx context.Context, delivery amqp.Delivery, handler fu
 func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 	var event domain.AvatarUploadEvent
 	if err := json.Unmarshal(body, &event); err != nil {
-		w.log.Error("skip malformed upload event", "err", err)
+		w.log.ErrorContext(ctx, "skip malformed upload event", "err", err)
 		return nil
 	}
 
@@ -152,7 +178,7 @@ func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 
 	avatarID, err := uuid.Parse(event.AvatarID)
 	if err != nil {
-		w.log.Error("skip event with invalid avatar id", "avatar_id", event.AvatarID, "err", err)
+		w.log.ErrorContext(ctx, "skip event with invalid avatar id", "avatar_id", event.AvatarID, "err", err)
 		return nil
 	}
 
@@ -160,7 +186,7 @@ func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			// Аватарку уже удалили — обрабатывать нечего.
-			w.log.Info("avatar not found, skipping", "avatar_id", event.AvatarID)
+			w.log.InfoContext(ctx, "avatar not found, skipping", "avatar_id", event.AvatarID)
 			return nil
 		}
 		return err
@@ -169,7 +195,7 @@ func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 	// Идемпотентность: повторная доставка того же события
 	// не должна выполнять работу заново.
 	if avatar.ProcessingStatus == domain.ProcessingStatusCompleted {
-		w.log.Info("avatar already processed, skipping", "avatar_id", event.AvatarID)
+		w.log.InfoContext(ctx, "avatar already processed, skipping", "avatar_id", event.AvatarID)
 		return nil
 	}
 
@@ -195,7 +221,7 @@ func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 		return err
 	}
 
-	w.log.Info("avatar processed", "avatar_id", event.AvatarID, "thumbnails", len(thumbnails))
+	w.log.InfoContext(ctx, "avatar processed", "avatar_id", event.AvatarID, "thumbnails", len(thumbnails))
 
 	return nil
 }
@@ -205,6 +231,18 @@ func (w *Worker) handleUpload(ctx context.Context, body []byte) error {
 func (w *Worker) makeThumbnails(ctx context.Context, avatarID, s3Key string) (
 	thumbnails map[string]string, width, height int32, err error,
 ) {
+
+	ctx, span := w.tracer.Start(ctx, "avatar.thumbnails",
+		trace.WithAttributes(attribute.String("avatar_id", avatarID)),
+	)
+	defer span.End()
+
+	start := time.Now()
+
+	defer func() {
+		w.metrics.ThumbnailDuration.Observe(time.Since(start).Seconds())
+	}()
+
 	obj, err := w.storage.Download(ctx, s3Key)
 	if err != nil {
 		return nil, 0, 0, err
@@ -242,7 +280,7 @@ func (w *Worker) makeThumbnails(ctx context.Context, avatarID, s3Key string) (
 func (w *Worker) handleDelete(ctx context.Context, body []byte) error {
 	var event domain.AvatarDeleteEvent
 	if err := json.Unmarshal(body, &event); err != nil {
-		w.log.Error("skip malformed delete event", "err", err)
+		w.log.ErrorContext(ctx, "skip malformed delete event", "err", err)
 		return nil
 	}
 
@@ -263,7 +301,7 @@ func (w *Worker) handleDelete(ctx context.Context, body []byte) error {
 		return err
 	}
 
-	w.log.Info("avatar files deleted", "avatar_id", event.AvatarID, "keys", len(event.S3Keys))
+	w.log.InfoContext(ctx, "avatar files deleted", "avatar_id", event.AvatarID, "keys", len(event.S3Keys))
 
 	return nil
 }
@@ -273,7 +311,7 @@ func (w *Worker) handleDelete(ctx context.Context, body []byte) error {
 func (w *Worker) checkEvent(ctx context.Context, eventID string) (id uuid.UUID, skip bool, err error) {
 	parsed, err := uuid.Parse(eventID)
 	if err != nil {
-		w.log.Error("skip event with invalid event id", "event_id", eventID, "err", err)
+		w.log.ErrorContext(ctx, "skip event with invalid event id", "event_id", eventID, "err", err)
 		return uuid.Nil, true, nil
 	}
 
@@ -282,7 +320,7 @@ func (w *Worker) checkEvent(ctx context.Context, eventID string) (id uuid.UUID, 
 		return uuid.Nil, false, err
 	}
 	if processed {
-		w.log.Info("event already processed, skipping", "event_id", eventID)
+		w.log.InfoContext(ctx, "event already processed, skipping", "event_id", eventID)
 		return parsed, true, nil
 	}
 

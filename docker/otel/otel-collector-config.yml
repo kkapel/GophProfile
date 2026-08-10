@@ -1,0 +1,51 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Копируем service.name в атрибут job — Loki превратит его в метку потока.
+  resource/add-job:
+    attributes:
+      - key: job
+        from_attribute: service.name
+        action: upsert
+
+  # Накопление логов пакетами: меньше запросов к Loki.
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+exporters:
+  # Loki принимает OTLP напрямую по /otlp — ручной маппинг меток не нужен.
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    compression: gzip
+    tls:
+      insecure: true
+
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true    
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors:
+        - resource/add-job
+        - batch
+      exporters: [otlphttp/loki]
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/jaeger]    

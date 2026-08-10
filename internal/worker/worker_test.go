@@ -16,13 +16,14 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/kkapel/GophProfile/internal/domain"
+	"github.com/kkapel/GophProfile/internal/metrics"
 	"github.com/kkapel/GophProfile/internal/repository"
 	"github.com/kkapel/GophProfile/internal/storage"
 )
 
 // newTestWorker создаёт worker с отключённым логированием.
 func newTestWorker(repo AvatarRepository, store FileStorage) *Worker {
-	return New(repo, store, nil, slog.New(slog.DiscardHandler))
+	return New(repo, store, nil, slog.New(slog.DiscardHandler), metrics.New())
 }
 
 // testJPEG возвращает валидное JPEG-изображение заданного размера.
