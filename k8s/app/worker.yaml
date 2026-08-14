@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gophprofile-worker
+  namespace: gophprofile
+  labels:
+    app: gophprofile-worker
+spec:
+  type: ClusterIP
+  selector:
+    app: gophprofile-worker
+  ports:
+    - name: metrics
+      port: 8081
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gophprofile-worker
+  namespace: gophprofile
+  labels:
+    app: gophprofile-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gophprofile-worker
+  template:
+    metadata:
+      labels:
+        app: gophprofile-worker
+    spec:
+      # Воркеру нужно время закончить обработку текущего сообщения.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: worker
+          image: gophprofile:1.0.0
+          imagePullPolicy: IfNotPresent
+          command: ["./worker"]
+          ports:
+            - name: metrics
+              containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: gophprofile-config
+            - secretRef:
+                name: gophprofile-secrets
+          startupProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            periodSeconds: 15
+            timeoutSeconds: 3
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

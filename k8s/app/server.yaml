@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gophprofile-server
+  namespace: gophprofile
+  labels:
+    app: gophprofile-server
+spec:
+  type: ClusterIP
+  selector:
+    app: gophprofile-server
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gophprofile-server
+  namespace: gophprofile
+  labels:
+    app: gophprofile-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gophprofile-server
+  template:
+    metadata:
+      labels:
+        app: gophprofile-server
+    spec:
+      # Время на завершение текущих запросов при остановке пода.
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: server
+          image: gophprofile:1.0.0
+          # Образ собран локально, тянуть из реестра не нужно.
+          imagePullPolicy: IfNotPresent
+          command: ["./server"]
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: gophprofile-config
+            - secretRef:
+                name: gophprofile-secrets
+          # Startup: даёт время на миграции при первом запуске.
+          startupProbe:
+            httpGet:
+              path: /metrics
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+          # Readiness проверяет зависимости: под с недоступной базой
+          # выводится из балансировки, но не перезапускается.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

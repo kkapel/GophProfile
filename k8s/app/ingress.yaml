@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gophprofile
+  namespace: gophprofile
+  annotations:
+    # Без этого nginx обрежет тело запроса на 1 МБ, и загрузка
+    # аватарки до 10 МБ не пройдёт.
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+spec:
+  # Указывает, какой контроллер обслуживает этот ingress.
+  ingressClassName: nginx
+  rules:
+    - host: gophprofile.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gophprofile-server
+                port:
+                  number: 80
