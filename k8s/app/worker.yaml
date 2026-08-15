@@ -31,13 +31,29 @@ spec:
       labels:
         app: gophprofile-worker
     spec:
+      # Отдельный ServiceAccount без прав вместо default.
+      serviceAccountName: gophprofile
       # Воркеру нужно время закончить обработку текущего сообщения.
       terminationGracePeriodSeconds: 60
+      # Настройки безопасности уровня пода.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: worker
           image: gophprofile:1.0.0
           imagePullPolicy: IfNotPresent
           command: ["./worker"]
+          # Настройки безопасности уровня контейнера.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: metrics
               containerPort: 8081
@@ -46,6 +62,11 @@ spec:
                 name: gophprofile-config
             - secretRef:
                 name: gophprofile-secrets
+          volumeMounts:
+            # Корень только для чтения; библиотека обработки изображений
+            # может использовать временные файлы.
+            - name: tmp
+              mountPath: /tmp
           startupProbe:
             httpGet:
               path: /metrics
@@ -65,3 +86,6 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+      volumes:
+        - name: tmp
+          emptyDir: {}

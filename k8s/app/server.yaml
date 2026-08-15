@@ -31,14 +31,30 @@ spec:
       labels:
         app: gophprofile-server
     spec:
+      # Отдельный ServiceAccount без прав вместо default.
+      serviceAccountName: gophprofile
       # Время на завершение текущих запросов при остановке пода.
       terminationGracePeriodSeconds: 30
+      # Настройки безопасности уровня пода.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: server
           image: gophprofile:1.0.0
           # Образ собран локально, тянуть из реестра не нужно.
           imagePullPolicy: IfNotPresent
           command: ["./server"]
+          # Настройки безопасности уровня контейнера.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: http
               containerPort: 8080
@@ -47,6 +63,11 @@ spec:
                 name: gophprofile-config
             - secretRef:
                 name: gophprofile-secrets
+          volumeMounts:
+            # Корень только для чтения, но multipart-формы выгружают
+            # крупные части во временные файлы.
+            - name: tmp
+              mountPath: /tmp
           # Startup: даёт время на миграции при первом запуске.
           startupProbe:
             httpGet:
@@ -54,6 +75,7 @@ spec:
               port: http
             periodSeconds: 5
             failureThreshold: 30
+          # Liveness проверяет только живость процесса.
           livenessProbe:
             httpGet:
               path: /metrics
@@ -75,3 +97,6 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+      volumes:
+        - name: tmp
+          emptyDir: {}
