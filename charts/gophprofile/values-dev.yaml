@@ -7,7 +7,7 @@ config:
 server:
   replicaCount: 1
   autoscaling:
-    enabled: false
+    enabled: true
 
 worker:
   replicaCount: 1

@@ -1,5 +1,7 @@
 {{- if .Values.networkPolicy.enabled }}
-# По умолчанию весь трафик в namespace запрещён.
+# По умолчанию в namespace запрещён весь трафик в обе стороны.
+# Всё, что нужно, разрешается отдельными политиками ниже: правила
+# складываются, поэтому достаточно перечислить только допустимое.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -7,6 +9,7 @@ metadata:
   labels:
     {{- include "gophprofile.labels" . | nindent 4 }}
 spec:
+  # Пустой селектор — значит все поды namespace.
   podSelector: {}
   policyTypes:
     - Ingress
@@ -32,15 +35,19 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace }}
-    # Prometheus скрейпит метрики.
+      ports:
+        - port: {{ .Values.server.port }}
+          protocol: TCP
+    # Prometheus забирает метрики с того же порта.
     - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace }}
       ports:
         - port: {{ .Values.server.port }}
+          protocol: TCP
   egress:
-    # DNS: без него не разрешатся имена сервисов.
+    # DNS: без него не разрешатся имена сервисов зависимостей.
     - to:
         - namespaceSelector:
             matchLabels:
@@ -50,8 +57,8 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    # Любые поды своего namespace: зависимости развёрнуты рядом,
-    # перечислять их по портам избыточно и хрупко.
+    # Любые поды своего namespace. Перечислять зависимости по портам
+    # избыточно: наружу namespace всё равно закрыт политикой default-deny.
     - to:
         - podSelector: {}
 ---
@@ -70,13 +77,15 @@ spec:
     - Ingress
     - Egress
   ingress:
-    # Воркер наружу ничего не отдаёт, кроме метрик.
+    # Воркер не обслуживает пользователей: снаружи к нему обращается
+    # только Prometheus за метриками.
     - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace }}
       ports:
         - port: {{ .Values.worker.metricsPort }}
+          protocol: TCP
   egress:
     - to:
         - namespaceSelector:
@@ -90,8 +99,11 @@ spec:
     - to:
         - podSelector: {}
 ---
-# Job миграций: политика создаётся как хук с меньшим весом,
-# чтобы существовать до запуска самого Job.
+# Политика для Job миграций. Создаётся как хук с меньшим весом, чем сам Job:
+# обычные ресурсы применяются уже после хуков, поэтому обычной политикой
+# под миграций остался бы под default-deny и не смог бы даже разрешить имя
+# базы через DNS. Гонку с прошивкой сетевых правил для нового пода гасит
+# цикл ожидания в initContainer Job'а.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -107,6 +119,7 @@ spec:
     matchLabels:
       {{- include "gophprofile.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: migrate
+  # Входящий трафик Job'у не нужен вовсе.
   policyTypes:
     - Egress
   egress:
@@ -121,9 +134,8 @@ spec:
           protocol: TCP
     - to:
         - podSelector: {}
-{{- if .Values.dependencies.enabled }}
 ---
-# Зависимости принимают трафик только изнутри namespace.
+# Зависимости принимают подключения только изнутри namespace.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -141,5 +153,4 @@ spec:
   ingress:
     - from:
         - podSelector: {}
-{{- end }}
 {{- end }}

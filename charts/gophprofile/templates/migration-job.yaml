@@ -2,48 +2,81 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  # Имя включает ревизию: Helm не сможет пересоздать Job с тем же именем,
-  # а параметры Job после создания неизменяемы.
   name: {{ include "gophprofile.fullname" . }}-migrate
   labels:
     {{- include "gophprofile.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
   annotations:
-    # На первой установке базы ещё нет: её StatefulSet создаётся после
-    # хуков. Поэтому при install миграции накатывает сам сервер при
-    # старте, а хук работает на последующих обновлениях.
+    # Только pre-upgrade. На первой установке базы ещё нет: её StatefulSet
+    # создаётся после хуков, подключаться было бы некуда. Там миграции
+    # накатывает сам сервер при старте.
     "helm.sh/hook": pre-upgrade
+    # Вес меньше нуля — Job выполняется раньше остальных хуков, если они появятся.
     "helm.sh/hook-weight": "-5"
+    # Перед созданием удаляем Job с прошлого обновления: параметры Job
+    # после создания неизменяемы. Успешный Job подчищаем сразу,
+    # упавший остаётся в кластере, чтобы можно было прочитать логи.
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
-  # Три попытки на случай, что база ещё поднимается.
-  backoffLimit: 3
+  # Четыре попытки суммарно. Если миграции не прошли, обновление
+  # прерывается и поды со старой версией продолжают работать.
+  backoffLimit: {{ .Values.migration.backoffLimit | default 3 }}
   template:
     metadata:
       labels:
         {{- include "gophprofile.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: migrate
     spec:
+      # Перезапуск пода не нужен: повторами управляет сам Job.
       restartPolicy: Never
       serviceAccountName: {{ include "gophprofile.serviceAccountName" . }}
+      automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.securityContext.pod | nindent 8 }}
+      # Ждём, пока база начнёт принимать подключения. Заодно даём сетевому
+      # контроллеру время прошить правила для нового пода: Job на каждой
+      # попытке создаётся заново и получает новый адрес, а migrate
+      # подключается в первую же секунду и не переживает отказ.
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z {{ include "gophprofile.fullname" . }}-postgres 5432; do
+                echo "waiting for postgres..."
+                sleep 2
+              done
+              echo "postgres is reachable"
+          securityContext:
+            {{- toYaml .Values.securityContext.container | nindent 12 }}
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       containers:
         - name: migrate
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["./migrate"]
           securityContext:
             {{- toYaml .Values.securityContext.container | nindent 12 }}
+          # Те же ConfigMap и Secret, что и у приложения: строка подключения
+          # к базе и путь к каталогу с миграциями берутся оттуда.
           envFrom:
             - configMapRef:
                 name: {{ include "gophprofile.fullname" . }}-config
             - secretRef:
-                name: {{ include "gophprofile.secretName" . }}
+                name: {{ .Values.secrets.existingSecret | default (printf "%s-secrets" (include "gophprofile.fullname" .)) }}
           resources:
             requests:
-              memory: 64Mi
               cpu: 50m
+              memory: 64Mi
             limits:
-              memory: 256Mi
               cpu: 200m
+              memory: 256Mi
 {{- end }}
