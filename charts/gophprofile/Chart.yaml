@@ -1,0 +1,12 @@
+apiVersion: v2
+name: gophprofile
+description: Микросервис управления аватарками пользователей
+type: application
+# Версия самого чарта.
+version: 0.1.0
+# Версия приложения, которое он разворачивает.
+appVersion: "1.0.0"
+keywords:
+  - avatars
+  - images
+  - go

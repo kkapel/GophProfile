@@ -1,0 +1,126 @@
+# Значения по умолчанию для чарта gophprofile.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: gophprofile
+  tag: "1.0.0"
+  # Образ собирается локально, из реестра не тянется.
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  name: ""
+  automountToken: false
+
+# Несекретные настройки приложения.
+config:
+  loggerLevel: INFO
+  migrationsPath: migrations
+  minioBucket: avatars
+  minioUseSSL: "false"
+  traceSampleRatio: "1.0"
+  otelEndpoint: http://otel-collector:4317
+  otelInsecure: "true"
+  environment: development
+
+# Секреты. В боевой среде создаются извне, см. secret.existingSecret.
+secrets:
+  # Имя готового Secret. Если задано, чарт свой не создаёт.
+  existingSecret: ""
+  databaseURL: "postgres://gophprofile:gophprofile@postgres:5432/gophprofile?sslmode=disable"
+  minioAccessKey: minioadmin
+  minioSecretKey: minioadmin
+  rabbitmqURL: "amqp://guest:guest@rabbitmq:5672/"
+
+server:
+  replicaCount: 1
+  port: 8080
+  terminationGracePeriodSeconds: 30
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+worker:
+  replicaCount: 1
+  metricsPort: 8081
+  terminationGracePeriodSeconds: 60
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+ingress:
+  enabled: true
+  className: nginx
+  host: gophprofile.localhost
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+  tls:
+    enabled: false
+    secretName: ""
+
+# Хук, применяющий миграции перед установкой и обновлением.
+migration:
+  enabled: true
+
+networkPolicy:
+  enabled: true
+   # Namespace, откуда разрешён входящий трафик.
+  ingressNamespace: ingress-nginx
+  monitoringNamespace: monitoring
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+
+# Зависимости разворачиваются вместе с приложением. В боевой среде
+# обычно отключаются в пользу управляемых сервисов.
+dependencies:
+  enabled: true
+  postgres:
+    image: postgres:16-alpine
+    storage: 2Gi
+    user: gophprofile
+    password: gophprofile
+    database: gophprofile
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    storage: 2Gi
+    rootUser: minioadmin
+    rootPassword: minioadmin
+  rabbitmq:
+    image: rabbitmq:4.3.4-management-alpine
+    storage: 1Gi
+    user: guest
+    password: guest
+
+securityContext:
+  pod:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  container:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]

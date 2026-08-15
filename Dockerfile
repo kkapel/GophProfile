@@ -12,6 +12,7 @@ COPY . .
 # CGO_ENABLED=0 даёт статический бинарник, который работает в alpine без libc.
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/server ./cmd/server
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/worker ./cmd/worker
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/migrate ./cmd/migrate
 
 # Финальный образ
 FROM alpine:3.20
@@ -23,7 +24,7 @@ RUN adduser -D -u 10001 -g gophprofile gophprofile
 
 WORKDIR /app
 
-COPY --from=builder /out/server /out/worker ./
+COPY --from=builder /out/server /out/worker /out/migrate ./
 COPY migrations ./migrations
 
 USER 10001

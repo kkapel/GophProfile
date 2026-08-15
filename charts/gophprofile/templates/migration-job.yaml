@@ -1,0 +1,49 @@
+{{- if .Values.migration.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Имя включает ревизию: Helm не сможет пересоздать Job с тем же именем,
+  # а параметры Job после создания неизменяемы.
+  name: {{ include "gophprofile.fullname" . }}-migrate
+  labels:
+    {{- include "gophprofile.labels" . | nindent 4 }}
+  annotations:
+    # На первой установке базы ещё нет: её StatefulSet создаётся после
+    # хуков. Поэтому при install миграции накатывает сам сервер при
+    # старте, а хук работает на последующих обновлениях.
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  # Три попытки на случай, что база ещё поднимается.
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "gophprofile.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "gophprofile.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.securityContext.pod | nindent 8 }}
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["./migrate"]
+          securityContext:
+            {{- toYaml .Values.securityContext.container | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "gophprofile.fullname" . }}-config
+            - secretRef:
+                name: {{ include "gophprofile.secretName" . }}
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 50m
+            limits:
+              memory: 256Mi
+              cpu: 200m
+{{- end }}

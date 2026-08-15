@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gophprofile.fullname" . }}-config
+  labels:
+    {{- include "gophprofile.labels" . | nindent 4 }}
+data:
+  GOPHPROFILE_HTTP_ADDRESS: ":{{ .Values.server.port }}"
+  GOPHPROFILE_METRICS_ADDRESS: ":{{ .Values.worker.metricsPort }}"
+  GOPHPROFILE_LOGGER_LEVEL: {{ .Values.config.loggerLevel | quote }}
+  GOPHPROFILE_MIGRATIONS_PATH: {{ .Values.config.migrationsPath | quote }}
+  GOPHPROFILE_MINIO_ENDPOINT: "{{ include "gophprofile.fullname" . }}-minio:9000"
+  GOPHPROFILE_MINIO_BUCKET: {{ .Values.config.minioBucket | quote }}
+  GOPHPROFILE_MINIO_USE_SSL: {{ .Values.config.minioUseSSL | quote }}
+  GOPHPROFILE_TRACE_SAMPLE_RATIO: {{ .Values.config.traceSampleRatio | quote }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.config.otelEndpoint | quote }}
+  OTEL_EXPORTER_OTLP_INSECURE: {{ .Values.config.otelInsecure | quote }}
+  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment={{ .Values.config.environment }}"
