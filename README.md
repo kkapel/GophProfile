@@ -2,8 +2,9 @@
 
 Микросервис управления аватарками пользователей: приём изображений, асинхронное
 создание миниатюр и выдача файлов через REST API и веб-интерфейс. Сервис
-полностью инструментирован: метрики, распределённая трассировка и
-структурированные логи с корреляцией по трейсам.
+инструментирован метриками, распределённой трассировкой и структурированными
+логами, разворачивается в Docker Compose для локальной разработки и в Kubernetes
+через Helm Chart.
 
 ## Возможности
 
@@ -16,7 +17,8 @@
 - Проверка работоспособности зависимостей на `/health`
 - Метрики Prometheus: RED, бизнес-показатели, состояние инфраструктуры
 - Сквозная трассировка запросов через HTTP, БД, S3 и брокер сообщений
-- Централизованные логи в Loki со ссылками на соответствующие трейсы
+- Централизованные логи со ссылками на соответствующие трейсы
+- Развёртывание в Kubernetes: автомасштабирование, сетевые политики, Helm Chart
 
 ## Стек
 
@@ -31,12 +33,12 @@
 | Доступ к БД | pgx v5 + sqlc |
 | Контракт API | OpenAPI 3.0 + oapi-codegen |
 | Телеметрия | OpenTelemetry SDK + OTel Collector |
-| Метрики | Prometheus + Node Exporter |
+| Метрики | Prometheus + Prometheus Operator |
 | Трассировка | Jaeger |
 | Логи | Grafana Loki |
 | Визуализация | Grafana |
 | Тесты | testify + uber-go/mock |
-| Контейнеризация | Docker, Docker Compose |
+| Оркестрация | Kubernetes, Helm |
 
 ## Архитектура
 
@@ -88,6 +90,46 @@ handlers → services → repository (PostgreSQL)
 Каждый нижний слой скрыт за интерфейсом, объявленным у потребителя, поэтому
 сервисы и обработчики тестируются на моках без поднятия инфраструктуры.
 
+### Развёртывание в Kubernetes
+
+```
+                    ┌─────────────────────────────────────────────┐
+   браузер ────────►│  Ingress (nginx)                            │
+   :80              │  host: gophprofile.localhost                │
+                    │  proxy-body-size: 10m                       │
+                    └───────────────────┬─────────────────────────┘
+                                        │
+                    ┌───────────────────▼─────────────────────────┐
+                    │  Service gophprofile-server  (ClusterIP)    │
+                    └───────────────────┬─────────────────────────┘
+                                        │
+        ┌───────────────────────────────▼──────────────┐   ┌──────────────┐
+        │  Deployment server                           │   │ HPA          │
+        │  ┌────────┐ ┌────────┐        probes:        │◄──┤ cpu 70%      │
+        │  │  pod   │ │  pod   │  startup/live/ready   │   │ mem 80%      │
+        │  └────────┘ └────────┘  non-root, RO rootfs  │   │ 1..5 реплик  │
+        └───────────────┬──────────────────────────────┘   └──────────────┘
+                        │
+        ┌───────────────▼──────────────┐    ┌─────────────────────────────┐
+        │  Deployment worker           │    │  Job migrate (Helm hook)    │
+        │  ┌────────┐                  │    │  pre-upgrade, ждёт БД       │
+        │  │  pod   │  metrics :8081   │    └─────────────────────────────┘
+        │  └────────┘                  │
+        └───────────────┬──────────────┘
+                        │
+   ┌────────────────────▼─────────────────────────────────────────┐
+   │  StatefulSet + PVC                                           │
+   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐        │
+   │  │ postgres-0   │  │  minio-0     │  │ rabbitmq-0   │        │
+   │  └──────────────┘  └──────────────┘  └──────────────┘        │
+   └──────────────────────────────────────────────────────────────┘
+
+   Namespace gophprofile закрыт NetworkPolicy: снаружи допускаются
+   только ingress-контроллер и Prometheus, исходящий трафик наружу
+   запрещён. ServiceMonitor в namespace monitoring собирает метрики
+   с /metrics обоих процессов.
+```
+
 ### Потоки телеметрии
 
 ```
@@ -99,10 +141,14 @@ server, worker ─────────────────────�
 ```
 
 Логи и трейсы приложение **отправляет** в OpenTelemetry Collector, а метрики
-Prometheus **забирает** сам, опрашивая эндпоинт `/metrics`. Grafana объединяет
-все три источника в одном интерфейсе.
+Prometheus **забирает** сам, опрашивая эндпоинт `/metrics`.
 
-## Быстрый старт
+В Kubernetes развёрнута только часть стека: Prometheus Operator собирает метрики
+через `ServiceMonitor`, а Collector, Jaeger и Loki остаются в docker-compose для
+локальной разработки. При запуске в кластере приложение пишет в логи ошибки
+экспорта телеметрии — это ожидаемо и на работу не влияет.
+
+## Быстрый старт: Docker Compose
 
 ```bash
 docker compose up --build -d
@@ -111,8 +157,7 @@ docker compose ps
 
 Поднимется одиннадцать контейнеров: приложение (server, worker), инфраструктура
 (PostgreSQL, MinIO, RabbitMQ) и стек наблюдаемости (OTel Collector, Prometheus,
-Node Exporter, Jaeger, Loki, Grafana). Миграции применяются автоматически при
-старте сервера, бакет создаётся при первом подключении к хранилищу.
+Node Exporter, Jaeger, Loki, Grafana).
 
 Точки входа:
 
@@ -134,13 +179,181 @@ docker compose down      # оставить данные
 docker compose down -v   # удалить данные
 ```
 
+## Развёртывание в Kubernetes
+
+### Требования
+
+- Kubernetes 1.29 или новее (проверялось на k3s в Rancher Desktop)
+- Helm 3
+- Ingress-контроллер nginx
+- Prometheus Operator, если нужен сбор метрик через `ServiceMonitor`
+
+Подготовка кластера:
+
+```bash
+# Ingress-контроллер
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm install ingress-nginx ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx --create-namespace
+
+# Prometheus Operator и Grafana
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm install monitoring prometheus-community/kube-prometheus-stack \
+  --namespace monitoring --create-namespace \
+  -f k8s/observability/kube-prometheus-values.yaml
+```
+
+### Установка через Helm
+
+```bash
+# Образ собирается локально и берётся кластером напрямую.
+docker build -t gophprofile:1.0.0 .
+
+kubectl apply -f k8s/namespace.yaml
+
+helm install gophprofile ./charts/gophprofile \
+  --namespace gophprofile \
+  -f ./charts/gophprofile/values-dev.yaml \
+  --wait --timeout 5m
+```
+
+Проверка:
+
+```bash
+kubectl get pods -n gophprofile
+curl http://gophprofile.localhost/health
+```
+
+Если домен не резолвится, добавьте в файл hosts:
+
+```
+127.0.0.1 gophprofile.localhost
+```
+
+### Обновление и откат
+
+```bash
+helm upgrade gophprofile ./charts/gophprofile \
+  -f ./charts/gophprofile/values-dev.yaml --wait
+
+helm history gophprofile
+helm rollback gophprofile 3
+```
+
+Перед обновлением выполняется хук `pre-upgrade`: Job запускает бинарник
+`migrate`, который применяет миграции. Если они не прошли, обновление
+прерывается и поды со старой версией продолжают работать.
+
+На первой установке хук не выполняется: StatefulSet базы создаётся после хуков,
+подключаться ещё некуда. Там миграции накатывает сам сервер при старте.
+
+Вместе с Job'ом как хук создаётся отдельная `NetworkPolicy` с меньшим весом —
+иначе под миграций попадает под правило `default-deny` и не может разрешить
+даже имя базы. Сам Job начинается с `initContainer`, который ждёт, пока
+PostgreSQL начнёт принимать подключения: на каждой попытке под создаётся
+заново и получает новый адрес, а сетевые правила для него прошиваются
+не мгновенно.
+
+### Values для окружений
+
+| Файл | Назначение |
+|---|---|
+| `values.yaml` | значения по умолчанию |
+| `values-dev.yaml` | локальная разработка: зависимости в кластере, отладочные логи, одна реплика |
+| `values-prod.yaml` | боевая среда: управляемые зависимости, внешний Secret, TLS, три реплики, выборка трейсов 10% |
+
+Посмотреть, во что разворачиваются шаблоны, не устанавливая:
+
+```bash
+helm lint ./charts/gophprofile
+helm template gophprofile ./charts/gophprofile -f ./charts/gophprofile/values-prod.yaml
+```
+
+### Сырые манифесты
+
+В `k8s/` лежат те же ресурсы без шаблонизации — с них начиналась работа,
+и они пригодятся, если Helm недоступен:
+
+```bash
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/dependencies/
+kubectl apply -f k8s/app/
+kubectl apply -f k8s/observability/servicemonitor.yaml
+```
+
+Одновременно с чартом их применять не следует: имена ресурсов совпадают
+частично, и два комплекта начнут конфликтовать за Ingress.
+
+### Масштабирование
+
+`HorizontalPodAutoscaler` управляет числом реплик сервера по загрузке
+процессора и памяти. Проценты считаются от `requests`, а не от limits, —
+без заданных `resources.requests` метрики остаются в состоянии `unknown`
+и масштабирование не работает.
+
+```bash
+kubectl get hpa -n gophprofile
+kubectl describe hpa gophprofile-server -n gophprofile
+```
+
+Проверить под нагрузкой:
+
+```bash
+kubectl run load-test --rm -it --image=busybox --restart=Never -- \
+  sh -c "while true; do wget -q -O- http://gophprofile-server/health > /dev/null; done"
+```
+
+Окна стабилизации асимметричны: разворачивание за 30 секунд, сворачивание
+за 5 минут — иначе на пилообразной нагрузке поды пересоздавались бы постоянно.
+
+Воркер по процессору масштабировать бессмысленно: он большую часть времени ждёт
+сообщений. Правильная метрика — глубина очереди, для неё понадобился бы
+Prometheus Adapter.
+
+### Пробы
+
+| Проба | Эндпоинт | Назначение |
+|---|---|---|
+| `startupProbe` | `/metrics` | даёт время на запуск и миграции, до её успеха остальные не выполняются |
+| `livenessProbe` | `/metrics` | живость процесса; перезапускает зависший под |
+| `readinessProbe` | `/health` | доступность зависимостей; выводит под из балансировки |
+
+Liveness намеренно не проверяет `/health`: при недоступной базе перезапуск пода
+не помогает и лишь усугубляет ситуацию. Такой под должен быть выведен из
+балансировки, но не перезапущен — за это отвечает readiness.
+
+### Безопасность
+
+- контейнеры работают от пользователя `10001`, `runAsNonRoot` не даст запустить образ от root
+- корневая файловая система смонтирована только для чтения, для временных файлов подключён `emptyDir` в `/tmp`
+- все привилегии Linux сброшены, повышение запрещено
+- отдельный `ServiceAccount` без ролей, токен API не монтируется
+- `NetworkPolicy` закрывает namespace: входящий трафик только от ingress-контроллера и Prometheus, исходящий наружу запрещён
+
+Секреты хранятся в объектах `Secret`, то есть закодированными в base64 — это не
+шифрование. В боевой среде их выносят во внешнее хранилище: чарт поддерживает
+`secrets.existingSecret`, куда подставляется секрет, созданный, например,
+External Secrets Operator или Vault.
+
+### Graceful shutdown
+
+Оба процесса обрабатывают SIGTERM: сервер перестаёт принимать соединения
+и дожидается текущих запросов, воркер завершает обработку текущего сообщения.
+
+У сервера дополнительно задан `preStop` с паузой в 5 секунд. Удаление пода
+из балансировки и отправка SIGTERM происходят параллельно, и без паузы часть
+запросов успевала бы прийти в уже завершающийся процесс.
+
+`terminationGracePeriodSeconds` — 30 секунд у сервера и 60 у воркера: обработка
+изображения занимает заметно больше времени, чем HTTP-запрос.
+
 ## Наблюдаемость
 
 ### Метрики
 
 Сервер отдаёт метрики на `:8080/metrics`, worker — на `:8081/metrics`.
-Prometheus опрашивает обоих каждые 15 секунд, список целей виден
-на http://localhost:9090/targets.
+В Kubernetes их обнаруживает Prometheus Operator через `ServiceMonitor`,
+в docker-compose — статический конфиг Prometheus.
 
 **HTTP (RED):**
 
@@ -174,10 +387,6 @@ Prometheus опрашивает обоих каждые 15 секунд, спи�
 | `gophprofile_events_processed_total` | counter | обработанные события по типу и статусу |
 | `gophprofile_thumbnail_duration_seconds` | histogram | время создания миниатюр |
 
-Показатели пула вычисляются в момент опроса, глубина очередей и объём
-хранилища обновляются фоновым сборщиком раз в 15 секунд, чтобы не нагружать
-эндпоинт метрик обращениями к БД и брокеру.
-
 Примеры запросов PromQL:
 
 ```promql
@@ -191,9 +400,6 @@ sum(rate(gophprofile_http_requests_total{status=~"5.."}[5m]))
 # 95-й перцентиль длительности
 histogram_quantile(0.95, sum(rate(gophprofile_http_request_duration_seconds_bucket[5m])) by (le))
 
-# скорость успешных загрузок
-rate(gophprofile_avatar_uploads_total{status="success"}[5m])
-
 # накопление очереди
 gophprofile_queue_depth
 ```
@@ -203,8 +409,6 @@ gophprofile_queue_depth
 Каждый HTTP-запрос порождает трейс, охватывающий оба процесса. Trace-контекст
 передаётся в заголовках AMQP-сообщения, поэтому обработка в worker'е попадает
 в то же дерево спанов, что и исходный запрос.
-
-Типичный трейс загрузки аватарки:
 
 ```
 POST /api/v1/avatars                      gophprofile-server
@@ -227,62 +431,36 @@ POST /api/v1/avatars                      gophprofile-server
 - **MinIO** — спаны с `SpanKindClient` и атрибутами ключа, бакета и размера
 - **RabbitMQ** — `SpanKindProducer` при публикации, `SpanKindConsumer` при чтении
 
-Смотреть трейсы: http://localhost:16686, выбрать сервис `gophprofile-server`
-и нажать **Find Traces**.
-
-Выборка настроена на `AlwaysSample` — записываются все запросы. Для боевой
-среды это заменяется на `TraceIDRatioBased`, чтобы не хранить трейсы каждого
-обращения.
+Доля записываемых трейсов задаётся параметром `GOPHPROFILE_TRACE_SAMPLE_RATIO`.
+Сэмплер обёрнут в `ParentBased`, поэтому при доле меньше единицы трейс
+не разрывается между сервисами: потребитель наследует решение отправителя.
 
 ### Логи
 
 Логи структурированные (JSON через `log/slog`) и уходят двумя путями: в stdout
-контейнера и в OpenTelemetry Collector, откуда попадают в Loki. Дублирование
-намеренное: `docker compose logs` продолжает работать при отладке.
+контейнера и в OpenTelemetry Collector. Дублирование намеренное: `kubectl logs`
+и `docker compose logs` продолжают работать при отладке.
 
 Каждая запись, сделанная в рамках трассируемой операции, содержит `trace_id`
-и `span_id`. В Grafana они превращаются в ссылку на Jaeger — из строки лога
-можно провалиться в трассировку запроса.
-
-Примеры запросов LogQL:
+и `span_id`. В Grafana они превращаются в ссылку на Jaeger.
 
 ```logql
-# все логи сервера
-{service_name="gophprofile-server"}
-
-# только ошибки обоих процессов
 {service_name=~"gophprofile-.*"} | severity_text = "ERROR"
-
-# неуспешные HTTP-ответы
 {service_name="gophprofile-server"} | status >= 400
-
-# медленные запросы
 {service_name="gophprofile-server"} | duration_ms > 100
-
-# читаемый поток запросов
-{service_name="gophprofile-server"} |= "http request"
-  | line_format "{{.method}} {{.path}} {{.status}} {{.duration_ms}}ms"
 ```
-
-Атрибуты записи (`method`, `path`, `status`, `duration_ms`, `request_id`,
-`trace_id`) хранятся как structured metadata и доступны для фильтрации без
-парсера. Метками потока остаются только `service_name` и
-`deployment_environment` — низкокардинальные значения, по которым Loki
-строит индекс.
 
 ### Дашборды
 
 Grafana подключает источники данных и дашборды автоматически при старте:
-конфигурация лежит в `docker/grafana/provisioning`, сами дашборды —
-в `docker/grafana/dashboards`.
+конфигурация в `docker/grafana/provisioning`, дашборды — в
+`docker/grafana/dashboards`.
 
-Дашборд «GophProfile — обзор сервиса» (http://localhost:3000, папка
-**GophProfile**) состоит из четырёх секций:
+Дашборд «GophProfile — обзор сервиса» состоит из четырёх секций: RED-метрики,
+бизнес-показатели, инфраструктура и логи со ссылками на трейсы.
 
-- **RED** — скорость запросов, доля ошибок, перцентили длительности, коды ответов
-- **Бизнес-показатели** — загрузки, время создания миниатюр, объём хранилища
-- **Инфраструктура** — глубина очередей, пул подключений, память, горутины
-- **Логи** — ошибки и поток HTTP-запросов со ссылками на трейсы
+При развёртывании в Kubernetes через `kube-prometheus-stack` дополнительно
+доступны готовые дашборды по кластеру — потребление ресурсов узлами и подами.
 
 ## Локальный запуск
 
@@ -314,8 +492,7 @@ go run ./cmd/worker
 ## Конфигурация
 
 Параметры приложения читаются из переменных окружения с префиксом
-`GOPHPROFILE_`, настройки телеметрии — из стандартных переменных `OTEL_`,
-которые OpenTelemetry SDK подхватывает сам.
+`GOPHPROFILE_`, настройки телеметрии — из стандартных переменных `OTEL_`.
 
 | Переменная | Обязательна | По умолчанию | Описание |
 |---|---|---|---|
@@ -323,6 +500,7 @@ go run ./cmd/worker
 | `GOPHPROFILE_METRICS_ADDRESS` | нет | `:8081` | адрес эндпоинта метрик worker'а |
 | `GOPHPROFILE_LOGGER_LEVEL` | нет | `INFO` | уровень логирования |
 | `GOPHPROFILE_MIGRATIONS_PATH` | нет | `migrations` | каталог с миграциями |
+| `GOPHPROFILE_TRACE_SAMPLE_RATIO` | нет | `1.0` | доля записываемых трейсов, от 0 до 1 |
 | `GOPHPROFILE_DATABASE_URL` | **да** | — | DSN подключения к PostgreSQL |
 | `GOPHPROFILE_MINIO_ENDPOINT` | нет | `localhost:9000` | адрес S3 API |
 | `GOPHPROFILE_MINIO_ACCESS_KEY` | **да** | — | ключ доступа к хранилищу |
@@ -333,10 +511,12 @@ go run ./cmd/worker
 | `OTEL_SERVICE_NAME` | нет | — | имя сервиса в телеметрии |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | нет | `localhost:4317` | адрес OTel Collector |
 | `OTEL_EXPORTER_OTLP_INSECURE` | нет | `false` | отключить TLS при экспорте |
-| `OTEL_RESOURCE_ATTRIBUTES` | нет | — | дополнительные атрибуты ресурса |
 
 Без обязательных переменных сервис не стартует и сообщает, какой именно
 параметр отсутствует.
+
+В Kubernetes несекретные значения приходят из `ConfigMap`, секреты — из
+`Secret`, оба подключаются через `envFrom`.
 
 ## REST API
 
@@ -363,30 +543,18 @@ go run ./cmd/worker
 
 ```bash
 # загрузка
-curl -X POST http://localhost:8080/api/v1/avatars \
+curl -X POST http://gophprofile.localhost/api/v1/avatars \
   -H "X-User-ID: user1" \
   -F "file=@photo.jpg"
 
 # миниатюра
-curl "http://localhost:8080/api/v1/avatars/<id>?size=100x100" --output thumb.jpg
+curl "http://gophprofile.localhost/api/v1/avatars/<id>?size=100x100" --output thumb.jpg
 
 # метаданные
-curl http://localhost:8080/api/v1/avatars/<id>/metadata
+curl http://gophprofile.localhost/api/v1/avatars/<id>/metadata
 
 # удаление
-curl -X DELETE http://localhost:8080/api/v1/avatars/<id> -H "X-User-ID: user1"
-```
-
-Ответ на загрузку:
-
-```json
-{
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "user_id": "user1",
-  "url": "/api/v1/avatars/550e8400-e29b-41d4-a716-446655440000",
-  "status": "processing",
-  "created_at": "2026-07-27T09:44:59Z"
-}
+curl -X DELETE http://gophprofile.localhost/api/v1/avatars/<id> -H "X-User-ID: user1"
 ```
 
 ## Веб-интерфейс
@@ -398,7 +566,7 @@ curl -X DELETE http://localhost:8080/api/v1/avatars/<id> -H "X-User-ID: user1"
 | `GET` | `/web/gallery/{user_id}` | галерея пользователя |
 
 Корень `/` перенаправляет на форму загрузки. Шаблоны вшиты в бинарник
-через `go:embed`, отдельного копирования файлов при развёртывании не требуется.
+через `go:embed`.
 
 ## Проверка работоспособности
 
@@ -416,8 +584,8 @@ curl -X DELETE http://localhost:8080/api/v1/avatars/<id> -H "X-User-ID: user1"
 ```
 
 При недоступности любого компонента возвращается `503` и его статус
-с текстом ошибки. Этот эндпоинт используется как healthcheck контейнера,
-поэтому падение зависимости отражается в `docker compose ps`.
+с текстом ошибки. Эндпоинт используется как readiness-проба в Kubernetes
+и healthcheck контейнера в docker-compose.
 
 ## Модель данных
 
@@ -467,15 +635,13 @@ Exchange `avatars.exchange` типа `topic`.
 
 **Идемпотентность.** Каждое сообщение несёт уникальный `event_id`. После
 успешной обработки worker регистрирует его в таблице `processed_events`
-и пропускает повторные доставки того же события. Дополнительно проверяется
-статус обработки аватарки. Операции хранилища идемпотентны сами по себе:
-перезапись объекта и удаление несуществующего ключа безопасны.
+и пропускает повторные доставки. Дополнительно проверяется статус обработки
+аватарки. Операции хранилища идемпотентны сами по себе.
 
 **Повторные попытки.** До трёх попыток с экспоненциальной задержкой
 (1 с, 2 с, 4 с). После исчерпания сообщение отклоняется без возврата
-в очередь, чтобы не образовался бесконечный цикл обработки. Ошибки,
-которые повтор не исправит (некорректный JSON или идентификатор),
-подтверждаются сразу и только логируются.
+в очередь. Ошибки, которые повтор не исправит (некорректный JSON или
+идентификатор), подтверждаются сразу и только логируются.
 
 ## Разработка
 
@@ -488,8 +654,7 @@ go generate ./internal/mocks/...     # моки интерфейсов серв�
 go generate ./internal/worker/...    # моки интерфейсов worker'а
 ```
 
-Сгенерированные файлы не редактируются вручную: при изменении схемы БД,
-спецификации API или интерфейсов нужно повторить генерацию.
+Сгенерированные файлы не редактируются вручную.
 
 ### Тесты
 
@@ -500,8 +665,7 @@ go tool cover -html=coverage.out
 ```
 
 Покрыты сервисный слой, HTTP-обработчики, обработчики событий worker'а
-и утилиты работы с изображениями. Внешние зависимости подменяются моками,
-инфраструктура для запуска тестов не требуется.
+и утилиты работы с изображениями. Внешние зависимости подменяются моками.
 
 ### Статический анализ
 
@@ -509,17 +673,23 @@ go tool cover -html=coverage.out
 golangci-lint run ./...
 ```
 
-Набор линтеров описан в `.golangci.yml`. Те же проверки выполняются в CI
-на каждый push и pull request.
+Набор линтеров описан в `.golangci.yml`. Те же проверки выполняются в CI.
 
 ## Структура проекта
 
 ```
 .
 ├── api/                    спецификация OpenAPI
+├── charts/gophprofile/     Helm Chart
+│   ├── Chart.yaml
+│   ├── values.yaml         значения по умолчанию
+│   ├── values-dev.yaml     локальная разработка
+│   ├── values-prod.yaml    боевая среда
+│   └── templates/          шаблоны ресурсов и хук миграций
 ├── cmd/
 │   ├── server/             HTTP-сервер
-│   └── worker/             обработчик событий
+│   ├── worker/             обработчик событий
+│   └── migrate/            применение миграций (Helm-хук)
 ├── docker/
 │   ├── grafana/            источники данных и дашборды
 │   ├── loki/               конфигурация хранилища логов
@@ -541,9 +711,14 @@ golangci-lint run ./...
 │   ├── storage/            работа с S3-совместимым хранилищем
 │   ├── tracing/            провайдер трассировки
 │   └── worker/             обработка событий брокера
+├── k8s/                    сырые манифесты Kubernetes
+│   ├── namespace.yaml
+│   ├── app/                приложение
+│   ├── dependencies/       PostgreSQL, MinIO, RabbitMQ
+│   └── observability/      ServiceMonitor и values для kube-prometheus-stack
 ├── migrations/             миграции базы данных
 ├── web/                    шаблоны веб-интерфейса
-├── Dockerfile              multi-stage сборка обоих бинарников
+├── Dockerfile              multi-stage сборка трёх бинарников
 └── docker-compose.yml      приложение, инфраструктура и наблюдаемость
 ```
 
@@ -551,8 +726,7 @@ golangci-lint run ./...
 
 **RabbitMQ не стартует после смены мажорной версии образа**
 
-Данные в volume несовместимы между ветками 3.x и 4.x. Удалите том
-и позвольте топологии объявиться заново при следующем запуске сервера:
+Данные в volume несовместимы между ветками 3.x и 4.x:
 
 ```bash
 docker compose down
@@ -560,15 +734,51 @@ docker volume rm gophprofile_rabbitdata
 docker compose up --build -d
 ```
 
+**Поды падают при первом запуске с `connection refused`**
+
+Приложение стартовало раньше базы. Kubernetes перезапускает под, вторая попытка
+проходит успешно — в статусе остаётся `RESTARTS 1`. Ожидаемое поведение;
+при желании убирается `initContainer`, ожидающим готовности PostgreSQL.
+
+**Job миграций не может подключиться к базе**
+
+Смотрите на текст ошибки. `bad address` или `name resolver error` означает,
+что не работает DNS: правило `default-deny` перекрывает исходящий трафик всем
+подам namespace, включая временные Job'ы, и политика для компонента `migrate`
+должна создаваться как хук — обычный ресурс применяется уже после хуков.
+`connection refused` при живой базе означает, что под не дождался прошивки
+сетевых правил, и лечится ожиданием в `initContainer`.
+
+**Не применяется изменение размера тома у зависимостей**
+
+```
+StatefulSet.apps is invalid: spec: Forbidden: updates to statefulset spec
+for fields other than 'replicas', ... are forbidden
+```
+
+`volumeClaimTemplates` после создания StatefulSet неизменяемы. Либо верните
+в values прежний размер, либо удалите объект, сохранив поды и тома:
+
+```bash
+kubectl delete statefulset gophprofile-minio -n gophprofile --cascade=orphan
+```
+
+Следующий `helm upgrade` создаст StatefulSet заново и подхватит существующий под.
+
+**Helm отказывается устанавливать чарт из-за существующего ресурса**
+
+Ресурс был создан через `kubectl apply` и не принадлежит релизу. Удалите
+сырые манифесты перед установкой чарта.
+
+**`kubectl` показывает пустой список**
+
+Проверьте текущий namespace:
+
+```bash
+kubectl config set-context --current --namespace=gophprofile
+```
+
 **Трейсы обрываются на границе сервисов**
 
-Проверьте, что в обоих процессах вызывается инициализация трассировки
-и что worker извлекает контекст из заголовков сообщения перед созданием
-спана. Признак проблемы — в Jaeger вместо одного дерева видны отдельные
-трейсы `POST /api/v1/avatars` и `consume avatar.uploaded`.
-
-**Цель Prometheus в состоянии DOWN**
-
-Откройте http://localhost:9090/targets — в колонке Error будет причина.
-Для `gophprofile-worker` типичная причина: не поднялся отдельный сервер
-метрик на `:8081`.
+Убедитесь, что инициализация трассировки вызывается в обоих процессах
+и что worker извлекает контекст из заголовков сообщения перед созданием спана.
