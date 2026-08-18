@@ -3,10 +3,8 @@
 package main
 
 import (
-	"context"
 	"log/slog"
 	"os"
-	"time"
 
 	"github.com/kkapel/GophProfile/internal/config"
 	"github.com/kkapel/GophProfile/internal/database"
@@ -25,15 +23,9 @@ func run() error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	// database.New применяет миграции и открывает пул подключений.
-	db, err := database.New(ctx, cfg.DatabaseURL, cfg.MigrationsPath)
-	if err != nil {
+	if err = database.RunMigrations(cfg.DatabaseURL, cfg.MigrationsPath); err != nil {
 		return err
 	}
-	defer db.Close()
 
 	slog.Info("migrations applied")
 

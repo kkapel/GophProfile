@@ -26,7 +26,7 @@ func New(ctx context.Context, dsn, migrationsPath string) (*DB, error) {
 		return nil, errors.New("database DSN is empty")
 	}
 
-	if err := runMigrations(dsn, migrationsPath); err != nil {
+	if err := RunMigrations(dsn, migrationsPath); err != nil {
 		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 
@@ -79,8 +79,8 @@ func (db *DB) Close() {
 	db.Pool.Close()
 }
 
-// runMigrations накатывает миграции из указанной директории.
-func runMigrations(dsn, migrationsPath string) error {
+// RunMigrations накатывает миграции из указанной директории.
+func RunMigrations(dsn, migrationsPath string) error {
 	m, err := migrate.New("file://"+migrationsPath, dsn)
 	if err != nil {
 		return fmt.Errorf("init migrate: %w", err)
