@@ -13,6 +13,7 @@ linters:
     - misspell
     - revive
     - unconvert
+    - gofmt
   settings:
     revive:
       rules:
