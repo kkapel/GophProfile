@@ -59,12 +59,11 @@ spec:
             {{- toYaml .Values.server.resources | nindent 12 }}
           securityContext:
             {{- toYaml .Values.securityContext.container | nindent 12 }}
-          # Стартовая проба даёт приложению время подняться и накатить
-          # миграции. Пока она не пройдёт, liveness и readiness не работают,
-          # поэтому медленный старт не приводит к перезапуску.
+          # Стартовая проба ждёт полной готовности приложения: миграции отработали,
+          # база, хранилище и брокер отвечают.
           startupProbe:
             httpGet:
-              path: /metrics
+              path: /health
               port: http
             periodSeconds: 5
             failureThreshold: 30

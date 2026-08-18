@@ -68,10 +68,10 @@ spec:
             # крупные части во временные файлы.
             - name: tmp
               mountPath: /tmp
-          # Startup: даёт время на миграции при первом запуске.
+          # Startup: даёт время на запуск приложения и его зависимостей: БД, MinIO и RabbitMQ
           startupProbe:
             httpGet:
-              path: /metrics
+              path: /health
               port: http
             periodSeconds: 5
             failureThreshold: 30
