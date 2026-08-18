@@ -1,0 +1,22 @@
+# Локальная разработка: зависимости внутри кластера, всё включено.
+
+config:
+  loggerLevel: DEBUG
+  environment: development
+
+server:
+  replicaCount: 1
+  autoscaling:
+    enabled: true
+
+worker:
+  replicaCount: 1
+
+ingress:
+  host: gophprofile.localhost
+
+dependencies:
+  enabled: true
+
+serviceMonitor:
+  enabled: true

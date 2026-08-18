@@ -1,0 +1,46 @@
+# Боевая среда
+
+image:
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+config:
+  loggerLevel: INFO
+  environment: production
+  traceSampleRatio: "0.1"
+
+secrets:
+  existingSecret: gophprofile-secrets
+
+server:
+  replicaCount: 3
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 200m
+    limits:
+      memory: 1Gi
+      cpu: 1000m
+
+worker:
+  replicaCount: 2
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 200m
+    limits:
+      memory: 1Gi
+      cpu: 1000m
+
+ingress:
+  host: avatars.example.com
+  tls:
+    enabled: true
+    secretName: gophprofile-tls
+
+dependencies:
+  enabled: false

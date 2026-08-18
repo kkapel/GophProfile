@@ -1,0 +1,166 @@
+# Имена ресурсов. Пустые значения означают «взять имя чарта».
+nameOverride: ""
+fullnameOverride: ""
+
+# Образ приложения: из него запускаются server, worker и migrate.
+image:
+  repository: gophprofile
+  # Образ собран локально, в реестр за ним ходить не нужно.
+  pullPolicy: IfNotPresent
+  tag: "1.0.0"
+
+serviceAccount:
+  create: true
+  # Приложение не обращается к API Kubernetes, токен ему не нужен.
+  automountToken: false
+
+# ---------------------------------------------------------------------------
+# Несекретные параметры. Попадают в ConfigMap и подключаются через envFrom.
+# ---------------------------------------------------------------------------
+config:
+  loggerLevel: INFO
+  migrationsPath: /app/migrations
+  # Доля записываемых трейсов: 1.0 — все запросы.
+  traceSampleRatio: "1.0"
+  minioBucket: avatars
+  minioUseSSL: "false"
+  otelEndpoint: "otel-collector:4317"
+  otelInsecure: "true"
+  # Уходит в OTEL_RESOURCE_ATTRIBUTES, чтобы отличать стенды в телеметрии.
+  environment: development
+
+# ---------------------------------------------------------------------------
+# Секреты. Для учебного стенда лежат здесь и попадают в объект Secret.
+# Если задан existingSecret, чарт свой Secret не создаёт и подключает
+# указанный — так подставляют секрет из Vault или External Secrets.
+# ---------------------------------------------------------------------------
+secrets:
+  existingSecret: ""
+  # Заполняются только когда dependencies.enabled = false: при развёрнутых
+  # внутри кластера зависимостях адреса собираются из имени релиза.
+  databaseURL: ""
+  rabbitmqURL: ""
+  minioAccessKey: minioadmin
+  minioSecretKey: minioadmin
+
+# ---------------------------------------------------------------------------
+# Безопасность. Один набор на все поды приложения.
+# ---------------------------------------------------------------------------
+securityContext:
+  pod:
+    # Kubernetes откажется стартовать под, если внутри образа UID нулевой.
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  container:
+    # Процесс не получит больше прав, чем имеет при старте.
+    allowPrivilegeEscalation: false
+    # Запись возможна только в примонтированные тома.
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+# ---------------------------------------------------------------------------
+# HTTP-сервер
+# ---------------------------------------------------------------------------
+server:
+  replicaCount: 1
+  port: 8080
+  resources:
+    # От requests считаются проценты в HPA, по ним же планировщик
+    # выбирает узел. limits — жёсткий потолок.
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+# ---------------------------------------------------------------------------
+# Обработчик событий
+# ---------------------------------------------------------------------------
+worker:
+  replicaCount: 1
+  metricsPort: 8081
+  # Обработка изображения длится заметно дольше HTTP-запроса,
+  # поэтому на завершение даём больше времени.
+  terminationGracePeriodSeconds: 60
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# Job миграций, выполняется как хук pre-upgrade.
+migration:
+  enabled: true
+  backoffLimit: 3
+
+# ---------------------------------------------------------------------------
+# Внешний доступ
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  host: gophprofile.localhost
+  annotations:
+    # По умолчанию nginx режет тело запроса на 1 МБ — загрузка упиралась бы в 413.
+    nginx.ingress.kubernetes.io/proxy-body-size: 10m
+  tls:
+    enabled: false
+    secretName: ""
+
+# ---------------------------------------------------------------------------
+# Сетевые политики
+# ---------------------------------------------------------------------------
+networkPolicy:
+  enabled: true
+  # Единственный источник внешнего трафика.
+  ingressNamespace: ingress-nginx
+  # Откуда разрешено ходить на /metrics.
+  monitoringNamespace: monitoring
+
+# Сбор метрик через Prometheus Operator.
+serviceMonitor:
+  enabled: true
+  interval: 15s
+
+# ---------------------------------------------------------------------------
+# Зависимости внутри кластера. В бою ставится false, а адреса управляемых
+# сервисов передаются через secrets.databaseURL и secrets.rabbitmqURL.
+# Размеры томов менять нельзя: volumeClaimTemplates после создания
+# StatefulSet неизменяемы.
+# ---------------------------------------------------------------------------
+dependencies:
+  enabled: true
+
+  postgres:
+    image: postgres:16-alpine
+    user: gophprofile
+    password: gophprofile
+    database: gophprofile
+    storage: 2Gi
+
+  minio:
+    image: minio/minio:latest
+    rootUser: minioadmin
+    rootPassword: minioadmin
+    storage: 2Gi
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    user: guest
+    password: guest
+    storage: 1Gi

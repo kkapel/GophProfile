@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gophprofile.fullname" . }}-server
+  labels:
+    {{- include "gophprofile.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  # Если включён HPA, поле replicas не задаём: иначе при каждом
+  # helm upgrade число подов сбрасывалось бы к значению из values,
+  # перетирая решение автомасштабировщика.
+  {{- if not .Values.server.autoscaling.enabled }}
+  replicas: {{ .Values.server.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "gophprofile.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: server
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Новый под поднимается раньше, чем гасится старый:
+      # обновление проходит без потери доступности.
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      annotations:
+        # Хеши конфигурации в аннотациях пода: при изменении ConfigMap
+        # или Secret меняется шаблон пода, и Kubernetes сам перезапускает
+        # поды. Без этого обновлённый конфиг не доехал бы до приложения.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      labels:
+        {{- include "gophprofile.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: server
+    spec:
+      serviceAccountName: {{ include "gophprofile.fullname" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
+      securityContext:
+        {{- toYaml .Values.securityContext.pod | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: server
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["./server"]
+          ports:
+            - name: http
+              containerPort: {{ .Values.server.port }}
+              protocol: TCP
+          # Несекретные параметры приходят из ConfigMap, секреты — из Secret.
+          envFrom:
+            - configMapRef:
+                name: {{ include "gophprofile.fullname" . }}-config
+            - secretRef:
+                name: {{ .Values.secrets.existingSecret | default (printf "%s-secrets" (include "gophprofile.fullname" .)) }}
+          resources:
+            {{- toYaml .Values.server.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext.container | nindent 12 }}
+          # Стартовая проба ждёт полной готовности приложения: миграции отработали,
+          # база, хранилище и брокер отвечают.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+            timeoutSeconds: 3
+          # Живость проверяем максимально дёшево — фактом ответа HTTP-сервера.
+          # Намеренно не /health: при недоступной базе перезапуск пода
+          # не поможет, а только добавит нагрузки.
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
+          # Готовность — это /health: если отвалилась база, MinIO или брокер,
+          # под выводится из балансировки, но продолжает работать.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
+          lifecycle:
+            # Пауза перед SIGTERM: за это время под успевает уйти
+            # из балансировки ingress-контроллера, и новые запросы
+            # перестают в него приходить.
+            preStop:
+              sleep:
+                seconds: 5
+          volumeMounts:
+            # Корень примонтирован только на чтение, поэтому под временные
+            # файлы multipart-загрузки выделяем отдельный том.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

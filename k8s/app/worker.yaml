@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gophprofile-worker
+  namespace: gophprofile
+  labels:
+    app: gophprofile-worker
+spec:
+  type: ClusterIP
+  selector:
+    app: gophprofile-worker
+  ports:
+    - name: metrics
+      port: 8081
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gophprofile-worker
+  namespace: gophprofile
+  labels:
+    app: gophprofile-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gophprofile-worker
+  template:
+    metadata:
+      labels:
+        app: gophprofile-worker
+    spec:
+      # Отдельный ServiceAccount без прав вместо default.
+      serviceAccountName: gophprofile
+      # Воркеру нужно время закончить обработку текущего сообщения.
+      terminationGracePeriodSeconds: 60
+      # Настройки безопасности уровня пода.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: gophprofile:1.0.0
+          imagePullPolicy: IfNotPresent
+          command: ["./worker"]
+          # Настройки безопасности уровня контейнера.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: metrics
+              containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: gophprofile-config
+            - secretRef:
+                name: gophprofile-secrets
+          volumeMounts:
+            # Корень только для чтения; библиотека обработки изображений
+            # может использовать временные файлы.
+            - name: tmp
+              mountPath: /tmp
+          startupProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            periodSeconds: 15
+            timeoutSeconds: 3
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: tmp
+          emptyDir: {}
