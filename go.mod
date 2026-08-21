@@ -1,6 +1,6 @@
 module github.com/kkapel/GophProfile
 
-go 1.25.5
+go 1.27.0
 
 require (
 	github.com/disintegration/imaging v1.6.2
